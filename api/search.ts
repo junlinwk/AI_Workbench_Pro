@@ -1,30 +1,6 @@
-import { rateLimit, getClientIp } from "./_lib/security"
-
-// Inline types to avoid @vercel/node dependency
-interface VercelRequest {
-  method?: string
-  headers: Record<string, string | string[] | undefined>
-  query: Record<string, string | string[] | undefined>
-}
-
-interface VercelResponse {
-  status(code: number): VercelResponse
-  json(body: unknown): VercelResponse
-  setHeader(name: string, value: string): VercelResponse
-}
-
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse,
-) {
+export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
     return res.status(405).json({ results: [], error: "Method not allowed" })
-  }
-
-  const clientIp = getClientIp(req.headers)
-
-  if (!rateLimit(clientIp, 60_000, 30)) {
-    return res.status(429).json({ results: [], error: "Rate limited" })
   }
 
   const query = (

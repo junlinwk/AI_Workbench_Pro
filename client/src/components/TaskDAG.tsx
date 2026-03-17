@@ -506,11 +506,10 @@ async function callNodeAI(
       throw new Error(`Unsupported provider: ${model.providerId}`)
   }
 
-  // Route through server-side proxy when available
+  // Only use server proxy on localhost (Vercel Hobby has 10s timeout)
   const useProxy =
     typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" ||
-      window.location.protocol === "https:")
+    window.location.hostname === "localhost"
 
   let res: Response
   if (useProxy) {
