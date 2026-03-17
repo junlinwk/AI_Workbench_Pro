@@ -150,7 +150,245 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+/** Strip HTML tags and decode entities */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Vite plugin: Search + URL fetch proxy for dev server
+ */
+function vitePluginSearchProxy(): Plugin {
+  return {
+    name: "search-proxy",
+    configureServer(server: ViteDevServer) {
+      // ── /api/search — DuckDuckGo Instant Answer + Wikipedia ──
+      server.middlewares.use("/api/search", async (req, res) => {
+        const url = new URL(req.url || "/", "http://localhost");
+        const query = (url.searchParams.get("q") || "").trim();
+        if (!query) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ results: [] }));
+          return;
+        }
+
+        try {
+          const results: { title: string; snippet: string; url: string }[] = [];
+
+          // Source 1: DuckDuckGo Instant Answer API (always works, no captcha)
+          const ddgRes = await fetch(
+            `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+            { headers: { "User-Agent": "Mozilla/5.0 (compatible; AIWorkbench/1.0)" } }
+          );
+          if (ddgRes.ok) {
+            const ddg = await ddgRes.json();
+            if (ddg.AbstractText) {
+              results.push({
+                title: ddg.Heading || query,
+                snippet: ddg.AbstractText,
+                url: ddg.AbstractURL || "",
+              });
+            }
+            if (ddg.Answer) {
+              results.push({ title: "Direct Answer", snippet: ddg.Answer, url: "" });
+            }
+            if (ddg.RelatedTopics) {
+              for (const topic of ddg.RelatedTopics.slice(0, 6)) {
+                if (topic.Text) {
+                  results.push({
+                    title: topic.FirstURL?.split("/").pop()?.replace(/_/g, " ") || "",
+                    snippet: topic.Text,
+                    url: topic.FirstURL || "",
+                  });
+                }
+                // Handle sub-topics (category groups)
+                if (topic.Topics) {
+                  for (const sub of topic.Topics.slice(0, 3)) {
+                    if (sub.Text) {
+                      results.push({
+                        title: sub.FirstURL?.split("/").pop()?.replace(/_/g, " ") || "",
+                        snippet: sub.Text,
+                        url: sub.FirstURL || "",
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Source 2: Wikipedia API for richer content
+          const wikiRes = await fetch(
+            `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`,
+            { headers: { "User-Agent": "AIWorkbench/1.0" } }
+          );
+          if (wikiRes.ok) {
+            const wiki = await wikiRes.json();
+            if (wiki.extract && wiki.extract.length > 50) {
+              results.push({
+                title: `Wikipedia: ${wiki.title || query}`,
+                snippet: wiki.extract,
+                url: wiki.content_urls?.desktop?.page || "",
+              });
+            }
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ results: results.slice(0, 10) }));
+        } catch (err: any) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ results: [], error: err.message }));
+        }
+      });
+
+      // ── /api/fetch-url — Extract readable text from a URL (SSRF-protected) ──
+      server.middlewares.use("/api/fetch-url", async (req, res) => {
+        const url = new URL(req.url || "/", "http://localhost");
+        const targetUrl = (url.searchParams.get("url") || "").trim();
+        if (!targetUrl) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ text: "", error: "No URL provided" }));
+          return;
+        }
+
+        // SSRF protection: validate URL
+        let parsedTarget: URL;
+        try {
+          parsedTarget = new URL(targetUrl);
+          if (parsedTarget.protocol !== "http:" && parsedTarget.protocol !== "https:") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ text: "", error: "Only http(s) allowed" }));
+            return;
+          }
+          if (parsedTarget.username || parsedTarget.password) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ text: "", error: "Credentials in URL not allowed" }));
+            return;
+          }
+          const h = parsedTarget.hostname;
+          const isPrivate = h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "[::1]" ||
+            h.endsWith(".local") || h.endsWith(".internal") || h === "metadata.google.internal";
+          if (!isPrivate) {
+            const parts = h.split(".");
+            if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
+              const [a, b] = parts.map(Number);
+              if (a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) ||
+                  (a === 192 && b === 168) || (a === 169 && b === 254)) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ text: "", error: "Private IP blocked" }));
+                return;
+              }
+            }
+          } else {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ text: "", error: "Private hostname blocked" }));
+            return;
+          }
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ text: "", error: "Invalid URL" }));
+          return;
+        }
+
+        try {
+          const response = await fetch(parsedTarget.href, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7",
+            },
+            redirect: "follow",
+            signal: AbortSignal.timeout(15000),
+          });
+
+          if (!response.ok) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ text: "", error: `HTTP ${response.status}` }));
+            return;
+          }
+
+          const contentType = response.headers.get("content-type") || "";
+          const rawHtml = await response.text();
+
+          // Extract title
+          const titleMatch = rawHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          const title = titleMatch ? htmlToText(titleMatch[1]) : "";
+
+          // Extract main text content
+          let text = htmlToText(rawHtml);
+          // Limit to ~4000 chars to avoid token explosion
+          if (text.length > 4000) text = text.slice(0, 4000) + "... (truncated)";
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ title, text, url: targetUrl, contentType }));
+        } catch (err: any) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ text: "", error: err.message }));
+        }
+      });
+      // ── /api/ai/chat — AI API proxy (whitelist-only) ──
+      server.middlewares.use("/api/ai/chat", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+
+        const ALLOWED_PREFIXES = [
+          "https://api.openai.com/",
+          "https://api.anthropic.com/",
+          "https://generativelanguage.googleapis.com/",
+          "https://api.deepseek.com/",
+          "https://api.x.ai/",
+          "https://api.groq.com/",
+          "https://api.mistral.ai/",
+          "https://openrouter.ai/",
+        ];
+
+        let body = "";
+        req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        req.on("end", async () => {
+          try {
+            const { endpoint, headers: fwdHeaders, body: reqBody } = JSON.parse(body);
+            if (!endpoint || !ALLOWED_PREFIXES.some((p: string) => endpoint.startsWith(p))) {
+              res.writeHead(403, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Endpoint not allowed" }));
+              return;
+            }
+            // Strip dangerous headers
+            const BLOCKED = new Set(["host", "cookie", "set-cookie", "origin", "referer", "x-forwarded-for", "x-real-ip"]);
+            const safeHeaders: Record<string, string> = {};
+            if (fwdHeaders && typeof fwdHeaders === "object") {
+              for (const [k, v] of Object.entries(fwdHeaders)) {
+                if (typeof v === "string" && !BLOCKED.has(k.toLowerCase())) safeHeaders[k] = v;
+              }
+            }
+            const apiRes = await fetch(endpoint, {
+              method: "POST",
+              headers: safeHeaders,
+              body: typeof reqBody === "string" ? reqBody : JSON.stringify(reqBody),
+              signal: AbortSignal.timeout(120_000),
+            });
+            res.writeHead(apiRes.status, { "Content-Type": apiRes.headers.get("content-type") || "application/json" });
+            const resBody = await apiRes.text();
+            res.end(resBody);
+          } catch (err: any) {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "AI API request failed" }));
+          }
+        });
+      });
+    },
+  };
+}
+
+const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginSearchProxy()];
 
 export default defineConfig({
   plugins,

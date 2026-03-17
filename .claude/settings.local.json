@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx:*)",
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm check:*)",
+      "Bash(pnpm add:*)",
+      "Bash(ls:*)",
+      "Bash(export PATH=\"$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/*/bin:$PATH\")"
+    ]
+  }
+}

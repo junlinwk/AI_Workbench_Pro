@@ -95,6 +95,189 @@
   --glass-border: oklch(1 0 0 / 10%);
 }
 
+/* Light theme */
+.light {
+  --background: oklch(0.97 0.005 265);
+  --foreground: oklch(0.15 0.02 265);
+  --card: oklch(0.99 0.002 265);
+  --card-foreground: oklch(0.15 0.02 265);
+  --popover: oklch(0.99 0.002 265);
+  --popover-foreground: oklch(0.15 0.02 265);
+  --primary: oklch(0.55 0.22 255);
+  --primary-foreground: oklch(0.98 0.005 255);
+  --secondary: oklch(0.93 0.008 265);
+  --secondary-foreground: oklch(0.35 0.03 265);
+  --muted: oklch(0.94 0.006 265);
+  --muted-foreground: oklch(0.45 0.02 265);
+  --accent: oklch(0.50 0.22 290);
+  --accent-foreground: oklch(0.98 0.005 290);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0 0 0 / 10%);
+  --input: oklch(0 0 0 / 8%);
+  --ring: oklch(0.55 0.22 255);
+  --chart-1: oklch(0.55 0.22 255);
+  --chart-2: oklch(0.50 0.22 290);
+  --chart-3: oklch(0.60 0.18 200);
+  --chart-4: oklch(0.55 0.2 170);
+  --chart-5: oklch(0.55 0.22 25);
+  --sidebar: oklch(0.96 0.005 265);
+  --sidebar-foreground: oklch(0.20 0.015 265);
+  --sidebar-primary: oklch(0.55 0.22 255);
+  --sidebar-primary-foreground: oklch(0.98 0.005 255);
+  --sidebar-accent: oklch(0.93 0.008 265);
+  --sidebar-accent-foreground: oklch(0.20 0.015 265);
+  --sidebar-border: oklch(0 0 0 / 8%);
+  --sidebar-ring: oklch(0.55 0.22 255);
+  --brand-blue: oklch(0.55 0.22 255);
+  --brand-violet: oklch(0.50 0.22 290);
+  --brand-cyan: oklch(0.60 0.18 200);
+  --glass-bg: oklch(0 0 0 / 3%);
+  --glass-border: oklch(0 0 0 / 8%);
+}
+
+/* Font size variants (legacy — now overridden by inline style from SettingsContext) */
+[data-font-size="small"] { font-size: 13px; }
+[data-font-size="medium"] { font-size: 14px; }
+[data-font-size="large"] { font-size: 16px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Light theme — comprehensive overrides for hardcoded dark-mode colors
+   Remaps white-on-dark patterns to dark-on-light patterns.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* --- Global backgrounds --- */
+.light,
+.light body {
+  color: oklch(0.18 0.02 265);
+}
+
+/* Override all oklch dark backgrounds used inline */
+.light [style*="oklch(0.09"],
+.light [style*="oklch(0.10"],
+.light [style*="oklch(0.08"] {
+  background: oklch(0.97 0.005 265) !important;
+}
+
+/* --- Sidebar --- */
+.light [class*="bg-[oklch(0.11"] {
+  background: oklch(0.95 0.005 265) !important;
+}
+
+/* --- White-opacity text → dark-opacity text --- */
+.light .text-white\/90 { color: oklch(0.15 0.02 265) !important; }
+.light .text-white\/85 { color: oklch(0.18 0.02 265) !important; }
+.light .text-white\/80 { color: oklch(0.20 0.02 265) !important; }
+.light .text-white\/75 { color: oklch(0.25 0.02 265) !important; }
+.light .text-white\/70 { color: oklch(0.28 0.02 265) !important; }
+.light .text-white\/60 { color: oklch(0.35 0.02 265) !important; }
+.light .text-white\/50 { color: oklch(0.42 0.02 265) !important; }
+.light .text-white\/45 { color: oklch(0.45 0.02 265) !important; }
+.light .text-white\/40 { color: oklch(0.50 0.015 265) !important; }
+.light .text-white\/35 { color: oklch(0.52 0.015 265) !important; }
+.light .text-white\/30 { color: oklch(0.55 0.015 265) !important; }
+.light .text-white\/25 { color: oklch(0.60 0.01 265) !important; }
+.light .text-white\/20 { color: oklch(0.65 0.01 265) !important; }
+.light .text-white { color: oklch(0.12 0.02 265) !important; }
+
+/* --- White-opacity backgrounds → dark-opacity backgrounds --- */
+.light .bg-white\/5,
+.light .bg-white\/\[0\.02\],
+.light .bg-white\/\[0\.03\],
+.light .bg-white\/\[0\.04\] { background-color: oklch(0 0 0 / 3%) !important; }
+.light .bg-white\/\[0\.06\] { background-color: oklch(0 0 0 / 4%) !important; }
+.light .bg-white\/\[0\.08\] { background-color: oklch(0 0 0 / 5%) !important; }
+.light .bg-white\/8 { background-color: oklch(0 0 0 / 5%) !important; }
+.light .bg-white\/10 { background-color: oklch(0 0 0 / 6%) !important; }
+.light .bg-white\/\[0\.1\] { background-color: oklch(0 0 0 / 6%) !important; }
+
+/* --- White-opacity borders → dark-opacity borders --- */
+.light .border-white\/\[0\.06\] { border-color: oklch(0 0 0 / 8%) !important; }
+.light .border-white\/\[0\.08\] { border-color: oklch(0 0 0 / 10%) !important; }
+.light .border-white\/8 { border-color: oklch(0 0 0 / 10%) !important; }
+.light .border-white\/10 { border-color: oklch(0 0 0 / 12%) !important; }
+.light .border-white\/15 { border-color: oklch(0 0 0 / 15%) !important; }
+.light .border-white\/20 { border-color: oklch(0 0 0 / 18%) !important; }
+
+/* --- Hover states --- */
+.light .hover\:bg-white\/5:hover { background-color: oklch(0 0 0 / 5%) !important; }
+.light .hover\:bg-white\/8:hover { background-color: oklch(0 0 0 / 6%) !important; }
+.light .hover\:bg-white\/10:hover { background-color: oklch(0 0 0 / 7%) !important; }
+.light .hover\:bg-white\/\[0\.03\]:hover { background-color: oklch(0 0 0 / 4%) !important; }
+.light .hover\:bg-white\/\[0\.06\]:hover { background-color: oklch(0 0 0 / 5%) !important; }
+.light .hover\:bg-white\/\[0\.08\]:hover { background-color: oklch(0 0 0 / 6%) !important; }
+.light .hover\:bg-white\/\[0\.1\]:hover { background-color: oklch(0 0 0 / 7%) !important; }
+.light .hover\:text-white\/60:hover { color: oklch(0.30 0.02 265) !important; }
+.light .hover\:text-white\/70:hover { color: oklch(0.25 0.02 265) !important; }
+.light .hover\:text-white\/80:hover { color: oklch(0.20 0.02 265) !important; }
+.light .hover\:text-white\/90:hover { color: oklch(0.15 0.02 265) !important; }
+.light .hover\:text-white:hover { color: oklch(0.12 0.02 265) !important; }
+.light .hover\:border-white\/15:hover { border-color: oklch(0 0 0 / 15%) !important; }
+.light .hover\:border-white\/20:hover { border-color: oklch(0 0 0 / 18%) !important; }
+
+/* --- Chat message bubbles --- */
+.light .bg-blue-600\/25 { background-color: oklch(0.55 0.15 255 / 12%) !important; }
+.light .border-blue-500\/20 { border-color: oklch(0.55 0.15 255 / 25%) !important; }
+
+/* --- Prose (markdown rendering) --- */
+.light .prose-invert { --tw-prose-body: oklch(0.25 0.02 265); --tw-prose-headings: oklch(0.15 0.02 265); }
+.light .prose-p\:text-white\/75 p { color: oklch(0.25 0.02 265) !important; }
+.light .prose-headings\:text-white\/90 :is(h1, h2, h3, h4) { color: oklch(0.12 0.02 265) !important; }
+.light .prose-strong\:text-white\/90 strong { color: oklch(0.12 0.02 265) !important; }
+.light .prose-li\:text-white\/75 li { color: oklch(0.25 0.02 265) !important; }
+.light .prose-code\:text-blue-300 code { color: oklch(0.45 0.18 255) !important; }
+.light .prose-code\:bg-blue-900\/30 code { background-color: oklch(0.55 0.12 255 / 10%) !important; }
+.light .prose-blockquote\:text-white\/60 blockquote { color: oklch(0.35 0.02 265) !important; }
+.light .prose-blockquote\:border-l-blue-500\/50 blockquote { border-left-color: oklch(0.55 0.15 255 / 40%) !important; }
+
+/* --- Glass panel in light mode --- */
+.light .glass-panel {
+  background: oklch(1 0 0 / 70%) !important;
+  border-color: oklch(0 0 0 / 10%) !important;
+}
+
+/* --- Input placeholders --- */
+.light .placeholder\:text-white\/25::placeholder,
+.light .placeholder-white\/25::placeholder { color: oklch(0.60 0.01 265) !important; }
+
+/* --- Ring/focus overrides --- */
+.light .ring-white\/10 { --tw-ring-color: oklch(0 0 0 / 10%) !important; }
+.light .ring-white\/20 { --tw-ring-color: oklch(0 0 0 / 15%) !important; }
+
+/* --- ScrollbarStuff --- */
+.light .scrollbar-thumb-white\/10::-webkit-scrollbar-thumb { background: oklch(0 0 0 / 10%) !important; }
+
+/* --- WorkbenchPage background gradient --- */
+.light [style*="radial-gradient"] {
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.15 255 / 6%) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.15 290 / 5%) 0%, transparent 60%) !important;
+}
+
+/* --- Header backdrop --- */
+.light .bg-white\/2 { background-color: oklch(1 0 0 / 60%) !important; }
+.light .bg-white\/3 { background-color: oklch(1 0 0 / 65%) !important; }
+
+/* --- Dividers --- */
+.light .bg-white\/10 { background-color: oklch(0 0 0 / 8%) !important; }
+.light .bg-white\/20 { background-color: oklch(0 0 0 / 12%) !important; }
+
+/* --- Code blocks in light mode --- */
+.light .bg-\[oklch\(0\.10_0\.015_265\)\],
+.light .bg-\[oklch\(0\.08_0\.015_265\)\] {
+  background-color: oklch(0.95 0.005 265) !important;
+}
+.light .prose-pre\:bg-\[oklch\(0\.10_0\.015_265\)\] pre {
+  background-color: oklch(0.95 0.005 265) !important;
+  border-color: oklch(0 0 0 / 10%) !important;
+}
+.light .prose-pre\:border-white\/8 pre { border-color: oklch(0 0 0 / 10%) !important; }
+
+/* --- Shadows softer in light mode --- */
+.light .shadow-lg { box-shadow: 0 4px 12px oklch(0 0 0 / 8%) !important; }
+.light .shadow-xl { box-shadow: 0 8px 24px oklch(0 0 0 / 10%) !important; }
+.light .shadow-2xl { box-shadow: 0 12px 40px oklch(0 0 0 / 12%) !important; }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -247,4 +430,58 @@
   .fade-up-delay-1 { animation-delay: 0.1s; opacity: 0; }
   .fade-up-delay-2 { animation-delay: 0.2s; opacity: 0; }
   .fade-up-delay-3 { animation-delay: 0.3s; opacity: 0; }
+
+  /* Notepad animations */
+  @keyframes notepad-pulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+  }
+  .notepad-pulse {
+    animation: notepad-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-slide-in {
+    animation: fadeSlideIn 0.25s ease-out forwards;
+  }
+
+  @keyframes drop-pulse {
+    0%, 100% { border-color: rgba(59, 130, 246, 0.3); }
+    50% { border-color: rgba(59, 130, 246, 0.6); }
+  }
+  .drop-pulse {
+    animation: drop-pulse 1s ease-in-out infinite;
+  }
+
+  /* Range slider styling */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 0 8px rgba(59,130,246,0.4);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.2);
+    box-shadow: 0 0 8px rgba(59,130,246,0.4);
+  }
 }
