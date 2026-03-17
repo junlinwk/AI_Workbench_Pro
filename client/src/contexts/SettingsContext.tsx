@@ -18,7 +18,9 @@ import {
 import {
   obfuscateKeys,
   deobfuscateKeys,
+  setEncryptionUserId,
 } from "@/lib/storage/encryption"
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase"
 
 export type ThemeMode = "dark" | "light" | "system"
 export type Language = "zh-TW" | "en"
@@ -297,6 +299,38 @@ function persistSettings(settings: Settings, userId?: string) {
     apiKeys: obfuscateKeys(settings.apiKeys),
   }
   saveUserData(userId, SETTINGS_NAMESPACE, toSave)
+
+  // Trigger immediate sync so settings (incl. API keys) get pushed to cloud ASAP
+  import("@/lib/storage/supabase-sync")
+    .then(({ triggerSync }) => triggerSync())
+    .catch(() => {})
+}
+
+/** Pull settings from Supabase (called on login) */
+async function pullSettingsFromCloud(userId: string): Promise<Settings | null> {
+  const supabase = getSupabase()
+  if (!supabase || !isSupabaseConfigured()) return null
+
+  try {
+    const { data, error } = await supabase
+      .from("user_data")
+      .select("data")
+      .eq("user_id", userId)
+      .eq("namespace", SETTINGS_NAMESPACE)
+      .single()
+
+    if (error || !data?.data) return null
+
+    const remote = data.data as Settings
+    // Deobfuscate API keys from cloud
+    const apiKeys =
+      remote.apiKeys && typeof remote.apiKeys === "object"
+        ? deobfuscateKeys(remote.apiKeys)
+        : {}
+    return { ...DEFAULT_SETTINGS, ...remote, apiKeys }
+  } catch {
+    return null
+  }
 }
 
 function getResolvedTheme(mode: ThemeMode): "dark" | "light" {
@@ -354,9 +388,28 @@ export function SettingsProvider({
     root.style.fontSize = `${settings.fontSizePx}px`
   }, [settings.fontSize, settings.fontSizePx])
 
-  // Reload settings when userId changes
+  // Reload settings when userId changes + set encryption key + pull from cloud
   useEffect(() => {
-    setSettings(loadSettings(userId))
+    setEncryptionUserId(userId ?? null)
+    const local = loadSettings(userId)
+    setSettings(local)
+
+    // Try to pull from cloud — if cloud has API keys but local doesn't, merge them in
+    if (userId) {
+      pullSettingsFromCloud(userId).then((cloud) => {
+        if (!cloud) return
+        setSettings((prev) => {
+          // If local has no API keys but cloud does, use cloud keys
+          const localHasKeys = Object.keys(prev.apiKeys).length > 0
+          const cloudHasKeys = Object.keys(cloud.apiKeys).length > 0
+          if (!localHasKeys && cloudHasKeys) {
+            return { ...prev, apiKeys: cloud.apiKeys }
+          }
+          // If local has keys, keep local (user's latest changes)
+          return prev
+        })
+      })
+    }
   }, [userId])
 
   // Persist

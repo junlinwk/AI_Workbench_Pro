@@ -31,6 +31,42 @@ function cacheKey(userId: string, namespace: string): string {
 }
 
 // ---------------------------------------------------------------------------
+//  Debounced sync queue — coalesce rapid writes to the same namespace
+// ---------------------------------------------------------------------------
+
+const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>()
+const SYNC_DEBOUNCE_MS = 1500 // Wait 1.5s after last write before queuing
+
+function debouncedSyncEnqueue(
+  userId: string,
+  namespace: string,
+  data: string,
+): void {
+  const route = getNamespaceRoute(namespace)
+  if (!route.supabaseTable) return
+
+  const key = `${userId}:${namespace}`
+  // Cancel any pending enqueue for this namespace
+  const existing = pendingSyncs.get(key)
+  if (existing) clearTimeout(existing)
+
+  // Schedule new enqueue
+  pendingSyncs.set(
+    key,
+    setTimeout(() => {
+      pendingSyncs.delete(key)
+      syncQueueAdd({
+        userId,
+        namespace,
+        data,
+        createdAt: new Date().toISOString(),
+        retries: 0,
+      }).catch(() => {})
+    }, SYNC_DEBOUNCE_MS),
+  )
+}
+
+// ---------------------------------------------------------------------------
 //  Public synchronous API (drop-in replacement for old storage.ts)
 // ---------------------------------------------------------------------------
 
@@ -65,7 +101,7 @@ export function loadUserData<T>(
 /**
  * Synchronously save user data.
  * Updates in-memory cache immediately, then async-writes to IndexedDB
- * and enqueues a Supabase sync if the namespace is syncable.
+ * and enqueues a debounced Supabase sync.
  */
 export function saveUserData<T>(
   userId: string,
@@ -78,7 +114,7 @@ export function saveUserData<T>(
   // Async persist — fire and forget
   persistToIDB(userId, namespace, data).catch(() => {})
 
-  // Also write to localStorage as a fallback (until fully migrated)
+  // Also write to localStorage as a fallback
   try {
     const lsKey = `ai-wb-${namespace}-${userId}`
     localStorage.setItem(lsKey, JSON.stringify(data))
@@ -86,7 +122,7 @@ export function saveUserData<T>(
 }
 
 /**
- * Remove user data from cache, IndexedDB, and localStorage.
+ * Remove user data from cache, IndexedDB, localStorage, AND Supabase.
  */
 export function removeUserData(
   userId: string,
@@ -95,13 +131,25 @@ export function removeUserData(
   const key = cacheKey(userId, namespace)
   cache.delete(key)
 
-  // Async cleanup
+  // Cancel any pending sync for this namespace
+  const pendingKey = `${userId}:${namespace}`
+  const pending = pendingSyncs.get(pendingKey)
+  if (pending) {
+    clearTimeout(pending)
+    pendingSyncs.delete(pendingKey)
+  }
+
+  // Async cleanup from IDB
   idbDelete(userId, namespace).catch(() => {})
 
+  // Cleanup from localStorage
   try {
     const lsKey = `ai-wb-${namespace}-${userId}`
     localStorage.removeItem(lsKey)
   } catch {}
+
+  // Delete from Supabase
+  deleteFromCloud(userId, namespace).catch(() => {})
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +204,30 @@ export function listUserDataByPattern(
 }
 
 /**
- * Clear all user data from cache, IndexedDB, and localStorage.
+ * Clear all user data from cache, IndexedDB, localStorage, AND Supabase.
  */
 export async function clearAllUserData(userId: string): Promise<void> {
-  // Clear from cache
+  // Collect namespaces before clearing (for cloud delete)
+  const namespacesToDelete: string[] = []
   const prefix = `${userId}:`
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      namespacesToDelete.push(key.slice(prefix.length))
+    }
+  }
+
+  // Clear from cache
   for (const key of [...cache.keys()]) {
     if (key.startsWith(prefix)) {
       cache.delete(key)
+    }
+  }
+
+  // Cancel all pending syncs for this user
+  for (const [key, timer] of pendingSyncs.entries()) {
+    if (key.startsWith(prefix)) {
+      clearTimeout(timer)
+      pendingSyncs.delete(key)
     }
   }
 
@@ -173,8 +237,7 @@ export async function clearAllUserData(userId: string): Promise<void> {
     await idbClearUser(userId)
   } catch {}
 
-  // Clear from localStorage — use exact suffix match to avoid
-  // clearing another user whose ID is a substring of this one
+  // Clear from localStorage
   try {
     const suffix = `-${userId}`
     const keysToRemove: string[] = []
@@ -188,6 +251,9 @@ export async function clearAllUserData(userId: string): Promise<void> {
       localStorage.removeItem(key)
     }
   } catch {}
+
+  // Delete all user data from Supabase
+  deleteAllFromCloud(userId).catch(() => {})
 }
 
 // ---------------------------------------------------------------------------
@@ -200,9 +266,7 @@ let initialized = false
  * Initialize the storage layer:
  * 1. Migrate localStorage → IndexedDB (one-time)
  * 2. Hydrate in-memory cache from IndexedDB
- * 3. Start sync engine (Phase 3)
- *
- * Must be called after auth, before first render.
+ * 3. Start sync engine
  */
 export async function initStorage(userId: string): Promise<void> {
   if (initialized) return
@@ -216,12 +280,13 @@ export async function initStorage(userId: string): Promise<void> {
   // Step 2: Hydrate cache from IndexedDB
   await hydrateCache(userId)
 
-  // Step 3: Start sync engine (Phase 3 — will be a no-op until implemented)
+  // Step 3: Start sync engine — pass cache ref so remote pulls update in-memory
   try {
-    const { startSyncEngine } = await import("./supabase-sync")
+    const { startSyncEngine, setSyncCacheRef } = await import("./supabase-sync")
+    setSyncCacheRef(cache)
     startSyncEngine(userId)
   } catch {
-    // Sync engine not available yet — that's fine
+    // Sync engine not available — continue with local only
   }
 
   initialized = true
@@ -236,6 +301,12 @@ export async function resetStorage(): Promise<void> {
     const { stopSyncEngine } = await import("./supabase-sync")
     stopSyncEngine()
   } catch {}
+
+  // Cancel all pending syncs
+  for (const [, timer] of pendingSyncs) {
+    clearTimeout(timer)
+  }
+  pendingSyncs.clear()
 
   cache.clear()
   clearCurrentUser()
@@ -301,15 +372,41 @@ async function persistToIDB<T>(
   }
   await idbPut(row)
 
-  // Enqueue sync if the namespace should be synced
-  const route = getNamespaceRoute(namespace)
-  if (route.supabaseTable) {
-    await syncQueueAdd({
-      userId,
-      namespace,
-      data: serialised,
-      createdAt: new Date().toISOString(),
-      retries: 0,
-    }).catch(() => {})
+  // Debounced sync enqueue — coalesces rapid writes
+  debouncedSyncEnqueue(userId, namespace, serialised)
+}
+
+// ---------------------------------------------------------------------------
+//  Cloud delete helpers
+// ---------------------------------------------------------------------------
+
+async function deleteFromCloud(userId: string, namespace: string): Promise<void> {
+  try {
+    const { getSupabase, isSupabaseConfigured } = await import("../supabase")
+    const supabase = getSupabase()
+    if (!supabase || !isSupabaseConfigured()) return
+
+    await supabase
+      .from("user_data")
+      .delete()
+      .eq("user_id", userId)
+      .eq("namespace", namespace)
+  } catch {
+    // Silent fail — will be orphaned on cloud but harmless
+  }
+}
+
+async function deleteAllFromCloud(userId: string): Promise<void> {
+  try {
+    const { getSupabase, isSupabaseConfigured } = await import("../supabase")
+    const supabase = getSupabase()
+    if (!supabase || !isSupabaseConfigured()) return
+
+    await supabase
+      .from("user_data")
+      .delete()
+      .eq("user_id", userId)
+  } catch {
+    // Silent fail
   }
 }

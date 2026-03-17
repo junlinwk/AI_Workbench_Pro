@@ -10,7 +10,8 @@
       "Bash(pnpm check:*)",
       "Bash(pnpm add:*)",
       "Bash(ls:*)",
-      "Bash(export PATH=\"$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/*/bin:$PATH\")"
+      "Bash(export PATH=\"$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/*/bin:$PATH\")",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }

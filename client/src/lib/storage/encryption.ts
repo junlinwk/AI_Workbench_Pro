@@ -10,12 +10,23 @@ import { getSupabase, isSupabaseConfigured } from "../supabase"
 //  XOR obfuscation (local fallback — same as original SettingsContext)
 // ---------------------------------------------------------------------------
 
+/**
+ * Derive key bytes for XOR obfuscation.
+ * Uses userId when available (cross-device portable), falls back to device fingerprint.
+ */
+let _userId: string | null = null
+export function setEncryptionUserId(userId: string | null) {
+  _userId = userId
+}
+
 function deriveKeyBytes(): number[] {
-  const seed =
-    (typeof navigator !== "undefined" ? navigator.userAgent : "") +
-    (typeof screen !== "undefined"
-      ? `${screen.width}x${screen.height}`
-      : "")
+  // Use userId for cross-device portability; fallback to device fingerprint for legacy
+  const seed = _userId
+    ? `ai-wb-enc-${_userId}-v3`
+    : (typeof navigator !== "undefined" ? navigator.userAgent : "") +
+      (typeof screen !== "undefined"
+        ? `${screen.width}x${screen.height}`
+        : "")
   const bytes: number[] = []
   for (let i = 0; i < seed.length && bytes.length < 32; i++) {
     bytes.push(seed.charCodeAt(i) & 0xff)
@@ -32,7 +43,8 @@ export function obfuscateKey(plain: string): string {
     for (let i = 0; i < encoded.length; i++) {
       encrypted[i] = encoded[i] ^ keyBytes[i % keyBytes.length]
     }
-    return "enc2:" + btoa(String.fromCharCode(...encrypted))
+    const prefix = _userId ? "enc3:" : "enc2:"
+    return prefix + btoa(String.fromCharCode(...encrypted))
   } catch {
     return plain
   }
@@ -40,7 +52,7 @@ export function obfuscateKey(plain: string): string {
 
 export function deobfuscateKey(stored: string): string {
   try {
-    if (stored.startsWith("enc2:")) {
+    if (stored.startsWith("enc3:") || stored.startsWith("enc2:")) {
       const keyBytes = deriveKeyBytes()
       const raw = atob(stored.slice(5))
       const bytes = new Uint8Array(raw.length)

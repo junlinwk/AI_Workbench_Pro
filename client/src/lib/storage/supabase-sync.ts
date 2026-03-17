@@ -3,9 +3,9 @@
  *
  * Flow:
  *   startup → initialPull() → drainSyncQueue() → subscribeRealtime()
- *   write   → cache → IDB → online? upsert : syncQueue.add()
+ *   write   → cache → IDB → syncQueue → debounced drainSyncQueue()
  *   online  → drainSyncQueue() → subscribeRealtime()
- *   offline → unsubscribe() → writes go to syncQueue
+ *   offline → unsubscribe() → writes accumulate in syncQueue
  */
 import { getSupabase, isSupabaseConfigured } from "../supabase"
 import {
@@ -19,31 +19,59 @@ import type { UserDataRow } from "./types"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
 let syncActive = false
+let currentUserId: string | null = null
 let realtimeChannel: RealtimeChannel | null = null
 let onlineHandler: (() => void) | null = null
 let offlineHandler: (() => void) | null = null
+let drainTimer: ReturnType<typeof setTimeout> | null = null
+
+// Cache reference for updating in-memory cache from remote pulls
+let cacheRef: Map<string, unknown> | null = null
+
+/**
+ * Set the in-memory cache reference so sync can update it directly.
+ */
+export function setSyncCacheRef(cache: Map<string, unknown>) {
+  cacheRef = cache
+}
 
 /**
  * Start the sync engine for a given user.
- * Safe to call multiple times — only the first call takes effect.
  */
 export function startSyncEngine(userId: string): void {
   if (syncActive || !isSupabaseConfigured()) return
   syncActive = true
+  currentUserId = userId
+  console.log("[SyncEngine] Starting for user:", userId.slice(0, 8) + "...")
 
-  // Initial sync
   initialPull(userId)
-    .then(() => drainSyncQueue(userId))
-    .then(() => subscribeRealtime(userId))
-    .catch(() => {})
+    .then(() => {
+      console.log("[SyncEngine] Initial pull complete")
+      return drainSyncQueue(userId)
+    })
+    .then(() => {
+      console.log("[SyncEngine] Sync queue drained, subscribing to realtime")
+      subscribeRealtime(userId)
+    })
+    .catch((err) => {
+      console.warn("[SyncEngine] Startup error:", err)
+    })
 
-  // Listen for online/offline events
+  // Periodic drain every 10 seconds to catch queued writes
+  drainTimer = setInterval(() => {
+    if (navigator.onLine && currentUserId) {
+      drainSyncQueue(currentUserId).catch(() => {})
+    }
+  }, 10_000)
+
   onlineHandler = () => {
+    console.log("[SyncEngine] Online — draining queue")
     drainSyncQueue(userId)
       .then(() => subscribeRealtime(userId))
       .catch(() => {})
   }
   offlineHandler = () => {
+    console.log("[SyncEngine] Offline — pausing sync")
     unsubscribeRealtime()
   }
 
@@ -52,12 +80,17 @@ export function startSyncEngine(userId: string): void {
 }
 
 /**
- * Stop the sync engine and clean up listeners.
+ * Stop the sync engine and clean up.
  */
 export function stopSyncEngine(): void {
   syncActive = false
+  currentUserId = null
   unsubscribeRealtime()
 
+  if (drainTimer) {
+    clearInterval(drainTimer)
+    drainTimer = null
+  }
   if (onlineHandler) {
     window.removeEventListener("online", onlineHandler)
     onlineHandler = null
@@ -68,8 +101,17 @@ export function stopSyncEngine(): void {
   }
 }
 
+/**
+ * Trigger an immediate sync drain (called after important writes like settings).
+ */
+export function triggerSync(): void {
+  if (currentUserId && navigator.onLine) {
+    drainSyncQueue(currentUserId).catch(() => {})
+  }
+}
+
 // ---------------------------------------------------------------------------
-//  Internal: Pull remote data on startup
+//  Pull remote data on startup — writes to IDB AND in-memory cache
 // ---------------------------------------------------------------------------
 
 async function initialPull(userId: string): Promise<void> {
@@ -82,18 +124,26 @@ async function initialPull(userId: string): Promise<void> {
       .select("*")
       .eq("user_id", userId)
 
-    if (error || !data) return
+    if (error) {
+      console.warn("[SyncEngine] initialPull error:", error.message)
+      return
+    }
+    if (!data || data.length === 0) {
+      console.log("[SyncEngine] No remote data found")
+      return
+    }
+
+    console.log(`[SyncEngine] Pulled ${data.length} entries from cloud`)
 
     for (const row of data) {
       const namespace = row.namespace as string
       const remoteData = row.data
       const remoteVersion = (row.version as number) ?? 0
 
-      // Check if we have a local version
       const local = await idbGet(userId, namespace)
 
       if (!local) {
-        // No local data — accept remote
+        // No local — accept remote
         await idbPut({
           key: makeKey(userId, namespace),
           userId,
@@ -105,8 +155,11 @@ async function initialPull(userId: string): Promise<void> {
             synced: true,
           },
         })
+        // Update in-memory cache so the app sees it immediately
+        if (cacheRef) {
+          cacheRef.set(`${userId}:${namespace}`, remoteData)
+        }
       } else {
-        // Conflict resolution
         const localData = JSON.parse(local.data)
         const localVersion = local.meta.version
         const merged = resolveConflict(
@@ -119,20 +172,21 @@ async function initialPull(userId: string): Promise<void> {
         await idbPut({
           ...local,
           data: JSON.stringify(merged),
-          meta: {
-            ...local.meta,
-            synced: true,
-          },
+          meta: { ...local.meta, synced: true },
         })
+        // Update cache with merged data
+        if (cacheRef) {
+          cacheRef.set(`${userId}:${namespace}`, merged)
+        }
       }
     }
-  } catch {
-    // Network error — continue with local data
+  } catch (err) {
+    console.warn("[SyncEngine] initialPull network error:", err)
   }
 }
 
 // ---------------------------------------------------------------------------
-//  Internal: Push offline writes to Supabase
+//  Push queued writes to Supabase
 // ---------------------------------------------------------------------------
 
 async function drainSyncQueue(userId: string): Promise<void> {
@@ -142,16 +196,21 @@ async function drainSyncQueue(userId: string): Promise<void> {
   const entries = await syncQueueGetAll()
   const userEntries = entries.filter((e) => e.userId === userId)
 
+  if (userEntries.length === 0) return
+
+  console.log(`[SyncEngine] Draining ${userEntries.length} queued writes`)
+
   for (const entry of userEntries) {
     try {
       const route = getNamespaceRoute(entry.namespace)
       if (!route.supabaseTable) {
-        // Not syncable — just remove from queue
         if (entry.id) await syncQueueDelete(entry.id)
         continue
       }
 
-      const { error } = await supabase.from(route.supabaseTable).upsert(
+      // All sync goes to user_data table regardless of route mapping
+      // (messages, branches, etc. tables may not exist — user_data is the catch-all)
+      const { error } = await supabase.from("user_data").upsert(
         {
           user_id: userId,
           namespace: entry.namespace,
@@ -162,9 +221,10 @@ async function drainSyncQueue(userId: string): Promise<void> {
         { onConflict: "user_id,namespace" },
       )
 
-      if (!error && entry.id) {
-        await syncQueueDelete(entry.id)
-        // Mark as synced in IDB
+      if (error) {
+        console.warn(`[SyncEngine] Upsert failed for ${entry.namespace}:`, error.message)
+      } else {
+        if (entry.id) await syncQueueDelete(entry.id)
         const local = await idbGet(userId, entry.namespace)
         if (local) {
           await idbPut({
@@ -174,13 +234,13 @@ async function drainSyncQueue(userId: string): Promise<void> {
         }
       }
     } catch {
-      // Will retry on next online event
+      // Will retry on next drain cycle
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-//  Internal: Realtime subscription for remote changes
+//  Realtime subscription for remote changes (from other devices)
 // ---------------------------------------------------------------------------
 
 function subscribeRealtime(userId: string): void {
@@ -201,11 +261,11 @@ function subscribeRealtime(userId: string): void {
         const { new: newRow } = payload
         if (!newRow) return
 
-        const namespace = (newRow as Record<string, unknown>)
-          .namespace as string
+        const namespace = (newRow as Record<string, unknown>).namespace as string
         const remoteData = (newRow as Record<string, unknown>).data
-        const remoteVersion =
-          ((newRow as Record<string, unknown>).version as number) ?? 0
+        const remoteVersion = ((newRow as Record<string, unknown>).version as number) ?? 0
+
+        console.log(`[SyncEngine] Realtime update: ${namespace}`)
 
         const local = await idbGet(userId, namespace)
         if (local) {
@@ -226,6 +286,9 @@ function subscribeRealtime(userId: string): void {
               synced: true,
             },
           })
+          if (cacheRef) {
+            cacheRef.set(`${userId}:${namespace}`, merged)
+          }
         } else {
           await idbPut({
             key: makeKey(userId, namespace),
@@ -238,10 +301,15 @@ function subscribeRealtime(userId: string): void {
               synced: true,
             },
           })
+          if (cacheRef) {
+            cacheRef.set(`${userId}:${namespace}`, remoteData)
+          }
         }
       },
     )
-    .subscribe()
+    .subscribe((status) => {
+      console.log("[SyncEngine] Realtime status:", status)
+    })
 }
 
 function unsubscribeRealtime(): void {

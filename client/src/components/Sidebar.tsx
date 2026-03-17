@@ -9,7 +9,7 @@ import {
   Folder, FolderOpen, Star, Clock, Settings,
   User, LogOut, MoreHorizontal, PanelLeftClose, PanelLeft,
   Cpu, Trash2, Pin, PinOff, Edit3, Inbox, FolderPlus,
-  ArrowRight
+  ArrowRight, Lock, Unlock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ interface ChatItem {
   time: string;
   active?: boolean;
   pinned?: boolean;
+  lockHash?: string; // SHA-256 hash of password, undefined = unlocked
 }
 
 interface FolderItem {
@@ -36,6 +37,7 @@ interface FolderItem {
   children: FolderItem[];  // sub-folders
   parentId?: string;       // null/undefined = top-level
   prompt?: string;         // folder-specific prompt
+  lockHash?: string; // SHA-256 hash of password
 }
 
 /** Migrate old folder data (no `children` field) to new format */
@@ -170,6 +172,133 @@ const FOLDER_COLOR_CYCLE = [
   "text-indigo-400",
 ];
 
+/** Hash a password with a salt using SHA-256 */
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(password + "ai-wb-lock-salt")
+  const hash = await crypto.subtle.digest("SHA-256", data)
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
+
+/** Lock/Unlock password dialog */
+function LockDialog({
+  mode,
+  onSubmit,
+  onCancel,
+  lang,
+}: {
+  mode: "set" | "unlock"
+  onSubmit: (password: string) => void
+  onCancel: () => void
+  lang: string
+}) {
+  const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
+  const [error, setError] = useState("")
+
+  const handleSubmit = () => {
+    if (!password) {
+      setError(lang === "en" ? "Password required" : "請輸入密碼")
+      return
+    }
+    if (mode === "set" && password !== confirm) {
+      setError(lang === "en" ? "Passwords do not match" : "密碼不一致")
+      return
+    }
+    onSubmit(password)
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+      <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
+        <div
+          className="pointer-events-auto max-w-xs w-full mx-4 rounded-2xl border border-white/10 bg-[oklch(0.13_0.015_265)] backdrop-blur-2xl shadow-2xl p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Lock size={16} className="text-amber-400" />
+            <h3 className="text-sm font-semibold text-white/90">
+              {mode === "set"
+                ? lang === "en"
+                  ? "Set Lock Password"
+                  : "設定鎖定密碼"
+                : lang === "en"
+                  ? "Enter Password"
+                  : "輸入密碼"}
+            </h3>
+          </div>
+          <div className="space-y-3">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                setError("")
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit()
+                if (e.key === "Escape") onCancel()
+              }}
+              placeholder={
+                lang === "en" ? "Password" : "密碼"
+              }
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/80 placeholder:text-white/25 focus:border-blue-500/50 focus:outline-none"
+              autoFocus
+            />
+            {mode === "set" && (
+              <input
+                type="password"
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value)
+                  setError("")
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSubmit()
+                  if (e.key === "Escape") onCancel()
+                }}
+                placeholder={
+                  lang === "en" ? "Confirm password" : "確認密碼"
+                }
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/80 placeholder:text-white/25 focus:border-blue-500/50 focus:outline-none"
+              />
+            )}
+            {error && (
+              <p className="text-[10px] text-red-400">{error}</p>
+            )}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={onCancel}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs text-white/50 hover:text-white/70 hover:bg-white/5 transition-colors border border-white/10"
+            >
+              {lang === "en" ? "Cancel" : "取消"}
+            </button>
+            <button
+              onClick={handleSubmit}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs text-white font-medium bg-gradient-to-r from-blue-600/80 to-violet-600/80 hover:from-blue-500 hover:to-violet-500 transition-colors"
+            >
+              {mode === "set"
+                ? lang === "en"
+                  ? "Set Lock"
+                  : "上鎖"
+                : lang === "en"
+                  ? "Unlock"
+                  : "解鎖"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 /** Recursive folder node component */
 interface FolderNodeProps {
   folder: FolderItem;
@@ -205,6 +334,9 @@ interface FolderNodeProps {
   setPromptEditValue: (v: string) => void;
   handlePromptEditToggle: (folderId: string) => void;
   lang: string;
+  onLockChat: (chatId: string, mode: "set" | "unlock") => void;
+  onLockFolder: (folderId: string, mode: "set" | "unlock") => void;
+  unlockedIds: Set<string>;
 }
 
 function FolderNode({
@@ -220,6 +352,7 @@ function FolderNode({
   renamingId, renameValue, setRenameValue, handleRenameConfirm, setRenamingId,
   editingPromptFolderId, promptEditValue, setPromptEditValue, handlePromptEditToggle,
   lang,
+  onLockChat, onLockFolder, unlockedIds,
 }: FolderNodeProps) {
   const isDefault = DEFAULT_FOLDER_IDS.has(folder.id);
   const totalCount = countAllChats(folder);
@@ -269,6 +402,31 @@ function FolderNode({
           )}
         </button>
         <span className="text-[10px] text-white/20 shrink-0">{totalCount}</span>
+        {/* Lock icon for folders */}
+        {!isDefault && (
+          <button
+            onClick={e => {
+              e.stopPropagation()
+              if (folder.lockHash) {
+                onLockFolder(folder.id, "unlock")
+              } else {
+                onLockFolder(folder.id, "set")
+              }
+            }}
+            className={cn(
+              "shrink-0 p-0.5 rounded transition-opacity",
+              folder.lockHash
+                ? "opacity-60 text-amber-400 hover:opacity-100"
+                : "opacity-0 group-hover/folder:opacity-40 hover:!opacity-80 text-white/40"
+            )}
+            title={folder.lockHash
+              ? (lang === "en" ? "Locked" : "已鎖定")
+              : (lang === "en" ? "Lock folder" : "鎖定資料夾")
+            }
+          >
+            {folder.lockHash ? <Lock size={11} /> : <Unlock size={11} />}
+          </button>
+        )}
         {/* Prompt edit button for custom folders */}
         {!isDefault && (
           <button
@@ -348,6 +506,29 @@ function FolderNode({
                   </>
                 )}
               </div>
+              {/* Lock icon — always visible if locked, hover-visible if unlocked */}
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  if (chat.lockHash) {
+                    onLockChat(chat.id, "unlock")
+                  } else {
+                    onLockChat(chat.id, "set")
+                  }
+                }}
+                className={cn(
+                  "shrink-0 mt-0.5 p-0.5 rounded transition-opacity",
+                  chat.lockHash
+                    ? "opacity-60 text-amber-400 hover:opacity-100"
+                    : "opacity-0 group-hover:opacity-40 hover:!opacity-80 text-white/40"
+                )}
+                title={chat.lockHash
+                  ? (lang === "en" ? "Locked" : "已鎖定")
+                  : (lang === "en" ? "Lock chat" : "鎖定對話")
+                }
+              >
+                {chat.lockHash ? <Lock size={11} /> : <Unlock size={11} />}
+              </button>
               <button
                 onClick={e => { e.stopPropagation(); handleContextMenu(e, chat.id); }}
                 className="shrink-0 opacity-0 group-hover:opacity-40 hover:!opacity-80 mt-0.5 p-0.5 rounded"
@@ -393,6 +574,9 @@ function FolderNode({
               setPromptEditValue={setPromptEditValue}
               handlePromptEditToggle={handlePromptEditToggle}
               lang={lang}
+              onLockChat={onLockChat}
+              onLockFolder={onLockFolder}
+              unlockedIds={unlockedIds}
             />
           ))}
         </div>
@@ -418,7 +602,7 @@ export default function Sidebar({
   onFolderContext,
 }: SidebarProps) {
   const { settings } = useSettings();
-  const { user, logout } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const lang = settings.language;
   const effectiveUserId = user?.id || "anon";
   const [searchQuery, setSearchQuery] = useState("");
@@ -453,6 +637,14 @@ export default function Sidebar({
   // Folder prompt editing
   const [editingPromptFolderId, setEditingPromptFolderId] = useState<string | null>(null);
   const [promptEditValue, setPromptEditValue] = useState("");
+
+  // Lock state
+  const [lockDialog, setLockDialog] = useState<{
+    type: "chat" | "folder"
+    id: string
+    mode: "set" | "unlock" | "removeLock"
+  } | null>(null);
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
 
   // Guard: track last serialized folders to prevent infinite event loops
   const lastFolderJsonRef = useRef("");
@@ -505,6 +697,12 @@ export default function Sidebar({
   }, []);
 
   const toggleFolder = (id: string) => {
+    // Check if folder is locked and not yet unlocked this session
+    const folder = flattenFolders(folders).find(f => f.id === id);
+    if (folder?.lockHash && !unlockedIds.has(id) && !isAdmin) {
+      setLockDialog({ type: "folder", id, mode: "unlock" });
+      return;
+    }
     setExpandedFolders(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -518,6 +716,11 @@ export default function Sidebar({
   const totalChats = folders.reduce((sum, f) => sum + countAllChats(f), 0);
 
   const handleChatClick = (chat: ChatItem) => {
+    // Check if chat is locked and not yet unlocked this session
+    if (chat.lockHash && !unlockedIds.has(chat.id) && !isAdmin) {
+      setLockDialog({ type: "chat", id: chat.id, mode: "unlock" });
+      return;
+    }
     onSelectChat?.(chat.id);
     // Update active state across the tree
     setFolders(prev => updateChatsInTree(prev, c => ({ ...c, active: c.id === chat.id })));
@@ -863,6 +1066,100 @@ export default function Sidebar({
     }
   };
 
+  // --- Lock handlers ---
+  const handleLockChat = (chatId: string, mode: "set" | "unlock") => {
+    setLockDialog({ type: "chat", id: chatId, mode });
+  };
+
+  const handleLockFolder = (folderId: string, mode: "set" | "unlock") => {
+    setLockDialog({ type: "folder", id: folderId, mode });
+  };
+
+  const handleLockSubmit = async (password: string) => {
+    if (!lockDialog) return;
+    const hash = await hashPassword(password);
+
+    if (lockDialog.mode === "set") {
+      // Set lock
+      if (lockDialog.type === "chat") {
+        setFolders((prev) =>
+          updateChatsInTree(prev, (c) =>
+            c.id === lockDialog.id ? { ...c, lockHash: hash } : c,
+          ),
+        );
+      } else {
+        setFolders((prev) =>
+          updateFolderInTree(prev, lockDialog.id, (f) => ({
+            ...f,
+            lockHash: hash,
+          })),
+        );
+      }
+      toast.success(lang === "en" ? "Lock set" : "已上鎖");
+    } else if (lockDialog.mode === "removeLock") {
+      // Verify password then remove the lock entirely
+      const target =
+        lockDialog.type === "chat"
+          ? flattenFolders(folders)
+              .flatMap((f) => f.chats)
+              .find((c) => c.id === lockDialog.id)
+          : flattenFolders(folders).find(
+              (f) => f.id === lockDialog.id,
+            );
+
+      if (target?.lockHash === hash) {
+        if (lockDialog.type === "chat") {
+          setFolders((prev) =>
+            updateChatsInTree(prev, (c) =>
+              c.id === lockDialog.id
+                ? { ...c, lockHash: undefined }
+                : c,
+            ),
+          );
+        } else {
+          setFolders((prev) =>
+            updateFolderInTree(prev, lockDialog.id, (f) => ({
+              ...f,
+              lockHash: undefined,
+            })),
+          );
+        }
+        setUnlockedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(lockDialog.id);
+          return next;
+        });
+        toast.success(
+          lang === "en" ? "Lock removed" : "已移除鎖定",
+        );
+      } else {
+        toast.error(lang === "en" ? "Wrong password" : "密碼錯誤");
+        return; // Don't close dialog
+      }
+    } else {
+      // Verify unlock (session-only)
+      const target =
+        lockDialog.type === "chat"
+          ? flattenFolders(folders)
+              .flatMap((f) => f.chats)
+              .find((c) => c.id === lockDialog.id)
+          : flattenFolders(folders).find(
+              (f) => f.id === lockDialog.id,
+            );
+
+      if (target?.lockHash === hash) {
+        setUnlockedIds(
+          (prev) => new Set([...prev, lockDialog.id]),
+        );
+        toast.success(lang === "en" ? "Unlocked" : "已解鎖");
+      } else {
+        toast.error(lang === "en" ? "Wrong password" : "密碼錯誤");
+        return; // Don't close dialog
+      }
+    }
+    setLockDialog(null);
+  };
+
   return (
     <aside
       className={cn(
@@ -1011,6 +1308,9 @@ export default function Sidebar({
             setPromptEditValue={setPromptEditValue}
             handlePromptEditToggle={handlePromptEditToggle}
             lang={lang}
+            onLockChat={handleLockChat}
+            onLockFolder={handleLockFolder}
+            unlockedIds={unlockedIds}
           />
         ))}
         {/* Create Folder button */}
@@ -1097,6 +1397,25 @@ export default function Sidebar({
                   </div>
                 )}
               </div>
+              {/* Lock / Remove Lock */}
+              <button
+                onClick={() => {
+                  const chat = flattenFolders(folders).flatMap(f => f.chats).find(c => c.id === contextMenu.chatId);
+                  if (chat?.lockHash) {
+                    // Already locked — remove lock (requires password)
+                    setLockDialog({ type: "chat", id: contextMenu.chatId, mode: "removeLock" });
+                  } else {
+                    setLockDialog({ type: "chat", id: contextMenu.chatId, mode: "set" });
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-white/60 hover:bg-white/8 transition-colors"
+              >
+                {flattenFolders(folders).flatMap(f => f.chats).find(c => c.id === contextMenu.chatId)?.lockHash
+                  ? <><Unlock size={12} /> {lang === "en" ? "Remove Lock" : "移除鎖定"}</>
+                  : <><Lock size={12} /> {lang === "en" ? "Lock" : "上鎖"}</>
+                }
+              </button>
               <button
                 onClick={() => handleDeleteChat(contextMenu.chatId)}
                 className={cn(
@@ -1153,6 +1472,16 @@ export default function Sidebar({
           </div>
         )}
       </div>
+
+      {/* Lock Dialog */}
+      {lockDialog && (
+        <LockDialog
+          mode={lockDialog.mode === "removeLock" ? "unlock" : lockDialog.mode}
+          onSubmit={handleLockSubmit}
+          onCancel={() => setLockDialog(null)}
+          lang={lang}
+        />
+      )}
     </aside>
   );
 }

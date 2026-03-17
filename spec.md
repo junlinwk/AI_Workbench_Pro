@@ -157,6 +157,79 @@ In-Memory Cache  ──→  IndexedDB  ──→  Supabase (cloud sync)
 - On app startup, `initStorage(userId)` hydrates the cache from IndexedDB
 - Legacy localStorage data is auto-migrated on first load
 
+#### Sync Engine Details
+
+**Write flow:**
+```
+saveUserData() → cache.set() → persistToIDB() → debouncedSyncEnqueue()
+                                                       ↓ (1.5s debounce)
+                                                 syncQueue.add()
+                                                       ↓ (10s periodic drain)
+                                                 supabase.upsert()
+```
+
+**Startup flow:**
+```
+initStorage(userId)
+  → migrateFromLocalStorage()
+  → hydrateCache() (IDB → cache)
+  → startSyncEngine()
+      → initialPull() (Supabase → IDB + cache)
+      → drainSyncQueue() (push pending writes)
+      → subscribeRealtime() (live cross-device updates)
+```
+
+**Delete flow:**
+```
+removeUserData() → cache.delete() → idbDelete() → supabase.delete()
+clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all)
+```
+
+**Debouncing:** Rapid writes to the same namespace are coalesced via a 1.5s debounce timer. Only the latest version is enqueued, preventing sync queue flooding during typing or slider dragging.
+
+**Periodic drain:** Every 10 seconds, the sync engine drains the queue and pushes all pending writes to Supabase. Settings changes also trigger an immediate drain via `triggerSync()`.
+
+**Conflict resolution strategies (per namespace):**
+
+| Namespace pattern | Strategy | Behavior |
+|-------------------|----------|----------|
+| `settings` | `field-merge` | Merge individual fields, prefer newer |
+| `conv-messages:*` | `union-merge` | Union of all messages (no duplicates) |
+| `conv-memory:*` | `union-merge` | Union of memory entries |
+| `notepad` | `last-write-wins` | Latest version wins entirely |
+| `task-dag` | `last-write-wins` | Latest version wins |
+| Default | `last-write-wins` | Latest version wins |
+
+**Cross-device API key sync:**
+- API keys are encrypted with XOR using a userId-derived key (`ai-wb-enc-{userId}-v3`)
+- The same userId produces the same key on any device
+- Encrypted keys are stored in Supabase `user_data` table as part of settings
+- On login, `pullSettingsFromCloud()` fetches and decrypts keys from cloud
+- Prefix `enc3:` identifies userId-based encryption (vs. legacy `enc2:` device-based)
+
+**Realtime subscription:**
+- After initial sync, subscribes to `postgres_changes` on `user_data` table
+- Filtered by `user_id=eq.{userId}` — only receives own data changes
+- Remote changes are merged into local cache via `resolveConflict()`
+- Updates are reflected in the UI on next read from cache
+
+**What syncs to Supabase:**
+
+| Data | Namespace | Syncs |
+|------|-----------|-------|
+| Settings (incl. API keys) | `settings` | Yes — immediate trigger |
+| Conversations | `conv-messages:{id}` | Yes — debounced |
+| Branch data | `conv-branches:{id}` | Yes — debounced |
+| Conversation memory | `conv-memory:{id}` | Yes — debounced |
+| Memory map nodes | `memory-nodes` | Yes — debounced |
+| Memory map edges | `memory-edges` | Yes — debounced |
+| Notepad | `notepad` | Yes — debounced |
+| Task DAG | `task-dag` | Yes — debounced |
+| Context pins | `context-pins` | Yes — debounced |
+| Artifacts | `artifacts` | Yes — debounced |
+| Active conversation | `active-conversation` | Yes — debounced |
+| Semantic embeddings | `semantic-embeddings` | No (local only, recomputable) |
+
 ### 2.4 Routing
 
 Uses **wouter** (lightweight ~1KB router, patched via `patches/wouter@3.7.1.patch` to expose route paths to `window.__WOUTER_ROUTES__`).
