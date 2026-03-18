@@ -239,8 +239,20 @@ function AppearanceTab() {
           ]}
         />
       </SettingRow>
-      <SettingRow label={t("appearance.showAvatars", lang)} description={t("appearance.showAvatarsDesc", lang)}>
-        <ToggleSwitch checked={settings.showAvatars} onChange={v => updateSetting("showAvatars", v)} />
+      <SettingRow label={t("appearance.showAvatars", lang)} description={lang === "en" ? "Choose which avatars to display in chat" : "選擇對話中顯示哪些頭像"}>
+        <SelectButton<"both" | "user" | "ai" | "none">
+          value={settings.avatarDisplay || "both"}
+          onChange={v => {
+            updateSetting("avatarDisplay", v)
+            updateSetting("showAvatars", v !== "none")
+          }}
+          options={[
+            { value: "both", label: lang === "en" ? "Both" : "兩者" },
+            { value: "user", label: lang === "en" ? "Me" : "自己" },
+            { value: "ai", label: "AI" },
+            { value: "none", label: lang === "en" ? "None" : "隱藏" },
+          ]}
+        />
       </SettingRow>
       <SettingRow label={t("appearance.animations", lang)} description={t("appearance.animationsDesc", lang)}>
         <ToggleSwitch checked={settings.enableAnimations} onChange={v => updateSetting("enableAnimations", v)} />

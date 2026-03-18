@@ -51,6 +51,7 @@ export interface Settings {
   fontSizePx: number // 10–35, default 14
   messageDensity: MessageDensity
   showAvatars: boolean
+  avatarDisplay: "both" | "user" | "ai" | "none"
   enableAnimations: boolean
 
   // Language
@@ -103,6 +104,7 @@ const DEFAULT_SETTINGS: Settings = {
   fontSizePx: 14,
   messageDensity: "comfortable",
   showAvatars: true,
+  avatarDisplay: "both",
   enableAnimations: true,
   language: "zh-TW",
   sendKey: "enter",
@@ -157,6 +159,8 @@ function validateSettings(raw: any): Partial<Settings> {
     out.messageDensity = raw.messageDensity
   if (typeof raw.showAvatars === "boolean")
     out.showAvatars = raw.showAvatars
+  if (["both", "user", "ai", "none"].includes(raw.avatarDisplay))
+    out.avatarDisplay = raw.avatarDisplay
   if (typeof raw.enableAnimations === "boolean")
     out.enableAnimations = raw.enableAnimations
   if (VALID_LANGUAGES.includes(raw.language))

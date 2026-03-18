@@ -11,6 +11,7 @@ import { getSupabase, isSupabaseConfigured } from "../supabase"
 import {
   syncQueueGetAll,
   syncQueueDelete,
+  syncQueueClear,
 } from "./sync-queue"
 import { idbGet, idbPut, makeKey } from "./idb"
 import { getNamespaceRoute } from "./types"
@@ -45,12 +46,11 @@ export function startSyncEngine(userId: string): void {
   console.log("[SyncEngine] Starting for user:", userId.slice(0, 8) + "...")
 
   initialPull(userId)
-    .then(() => {
-      console.log("[SyncEngine] Initial pull complete")
-      return drainSyncQueue(userId)
-    })
-    .then(() => {
-      console.log("[SyncEngine] Sync queue drained, subscribing to realtime")
+    .then(async () => {
+      console.log("[SyncEngine] Initial pull complete — clearing stale queue")
+      // Clear stale queue entries that predate the pull (they would overwrite merged data)
+      await syncQueueClear()
+      console.log("[SyncEngine] Stale queue cleared, subscribing to realtime")
       subscribeRealtime(userId)
     })
     .catch((err) => {
@@ -200,21 +200,34 @@ async function drainSyncQueue(userId: string): Promise<void> {
 
   console.log(`[SyncEngine] Draining ${userEntries.length} queued writes`)
 
+  // Deduplicate: only push the latest entry per namespace
+  const latestByNs = new Map<string, typeof userEntries[0]>()
   for (const entry of userEntries) {
+    latestByNs.set(entry.namespace, entry) // last one wins
+  }
+
+  for (const [ns, entry] of latestByNs) {
     try {
-      const route = getNamespaceRoute(entry.namespace)
+      const route = getNamespaceRoute(ns)
       if (!route.supabaseTable) {
-        if (entry.id) await syncQueueDelete(entry.id)
+        // Remove all queue entries for this non-syncable namespace
+        for (const e of userEntries.filter(x => x.namespace === ns)) {
+          if (e.id) await syncQueueDelete(e.id)
+        }
         continue
       }
 
-      // All sync goes to user_data table regardless of route mapping
-      // (messages, branches, etc. tables may not exist — user_data is the catch-all)
+      // Use LATEST IDB data (not stale queue data) to prevent data loss
+      const latestLocal = await idbGet(userId, ns)
+      const dataToSync = latestLocal
+        ? JSON.parse(latestLocal.data)
+        : JSON.parse(entry.data)
+
       const { error } = await supabase.from("user_data").upsert(
         {
           user_id: userId,
-          namespace: entry.namespace,
-          data: JSON.parse(entry.data),
+          namespace: ns,
+          data: dataToSync,
           updated_at: new Date().toISOString(),
           version: Date.now(),
         },
@@ -222,14 +235,16 @@ async function drainSyncQueue(userId: string): Promise<void> {
       )
 
       if (error) {
-        console.warn(`[SyncEngine] Upsert failed for ${entry.namespace}:`, error.message)
+        console.warn(`[SyncEngine] Upsert failed for ${ns}:`, error.message)
       } else {
-        if (entry.id) await syncQueueDelete(entry.id)
-        const local = await idbGet(userId, entry.namespace)
-        if (local) {
+        // Remove ALL queue entries for this namespace (not just the latest)
+        for (const e of userEntries.filter(x => x.namespace === ns)) {
+          if (e.id) await syncQueueDelete(e.id)
+        }
+        if (latestLocal) {
           await idbPut({
-            ...local,
-            meta: { ...local.meta, synced: true },
+            ...latestLocal,
+            meta: { ...latestLocal.meta, synced: true },
           })
         }
       }

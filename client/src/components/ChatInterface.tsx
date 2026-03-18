@@ -124,6 +124,8 @@ Guidelines:
 function MessageBubble({
   message,
   showAvatar,
+  avatarDisplay,
+  userAvatarUrl,
   showTimestamp,
   onRegenerate,
   lang,
@@ -132,6 +134,8 @@ function MessageBubble({
 }: {
   message: Message
   showAvatar: boolean
+  avatarDisplay: "both" | "user" | "ai" | "none"
+  userAvatarUrl?: string
   showTimestamp: boolean
   onRegenerate?: () => void
   lang: "zh-TW" | "en"
@@ -176,16 +180,22 @@ function MessageBubble({
       )}
     >
       {showAvatar && (
+        (isUser ? (avatarDisplay === "both" || avatarDisplay === "user") : (avatarDisplay === "both" || avatarDisplay === "ai"))
+      ) && (
         <div
           className={cn(
-            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1",
+            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 overflow-hidden",
             isUser
-              ? "bg-gradient-to-br from-blue-500 to-violet-600"
+              ? userAvatarUrl ? "" : "bg-gradient-to-br from-blue-500 to-violet-600"
               : "bg-gradient-to-br from-violet-600 to-blue-500 ring-1 ring-white/10",
           )}
         >
           {isUser ? (
-            <User size={14} className="text-white" />
+            userAvatarUrl ? (
+              <img src={userAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+            ) : (
+              <User size={14} className="text-white" />
+            )
           ) : (
             <Sparkles size={14} className="text-white" />
           )}
@@ -1710,6 +1720,8 @@ export default function ChatInterface({
                 <MessageBubble
                   message={msg}
                   showAvatar={settings.showAvatars}
+                  avatarDisplay={settings.avatarDisplay || "both"}
+                  userAvatarUrl={user?.avatar}
                   showTimestamp={settings.showTimestamps}
                   onRegenerate={() => handleRegenerate(i)}
                   lang={lang}

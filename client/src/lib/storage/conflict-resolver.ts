@@ -15,7 +15,7 @@ type ConflictStrategy = "last-write-wins" | "field-merge" | "union-merge"
 
 /** Determine which strategy to use for a given namespace */
 export function getStrategy(namespace: string): ConflictStrategy {
-  if (namespace.startsWith("__settings__")) return "field-merge"
+  if (namespace === "settings") return "field-merge"
   if (namespace.startsWith("conv-messages:")) return "union-merge"
   if (
     namespace === "memory-nodes" ||
