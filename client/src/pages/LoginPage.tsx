@@ -201,7 +201,7 @@ function getStoredLanguage(): "zh-TW" | "en" {
         }
       }
     }
-  } catch {}
+  } catch { }
   return "zh-TW"
 }
 
@@ -415,7 +415,7 @@ export default function LoginPage() {
           saturation={160}
           aberrationIntensity={1.5}
           elasticity={0.12}
-          cornerRadius={24}
+          cornerRadius={32}
           padding="32px 36px"
           style={{
             position: "relative",
@@ -427,383 +427,383 @@ export default function LoginPage() {
           }}
         >
           <div style={{ width: "100%" }}>
-        {/* Logo — uses unified /logos/app-logo.png */}
-        <div className="flex flex-col items-center mb-6">
-          <img
-            src="/logos/app-logo.png"
-            alt="AI Workbench"
-            width={64}
-            height={64}
-            className="mb-4 rounded-2xl"
-            style={{ boxShadow: "0 8px 32px oklch(0.5 0.2 255 / 30%)" }}
-          />
-          <h1
-            className="text-2xl font-bold tracking-tight"
-            style={{ color: "oklch(0.95 0 0)" }}
-          >
-            {t.title}
-          </h1>
-          <p
-            className="text-sm mt-1"
-            style={{ color: "oklch(0.55 0 0)" }}
-          >
-            {t.subtitle}
-          </p>
-        </div>
-
-        {/* Tabs */}
-        <div
-          className="flex mb-6 rounded-full p-1"
-          style={{
-            background: "oklch(0.1 0.008 265 / 60%)",
-            border: "1px solid oklch(1 0 0 / 6%)",
-          }}
-        >
-          {(["login", "register"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => {
-                setActiveTab(tab)
-                setError("")
-                setSuccess("")
-              }}
-              className="flex-1 py-2 rounded-full text-sm font-medium transition-all duration-200"
-              style={{
-                background:
-                  activeTab === tab
-                    ? "linear-gradient(135deg, oklch(0.6 0.2 255 / 20%), oklch(0.55 0.25 290 / 20%))"
-                    : "transparent",
-                color:
-                  activeTab === tab
-                    ? "oklch(0.9 0 0)"
-                    : "oklch(0.5 0 0)",
-                border:
-                  activeTab === tab
-                    ? "1px solid oklch(0.6 0.2 255 / 25%)"
-                    : "1px solid transparent",
-              }}
-            >
-              {tab === "login"
-                ? t.loginTab
-                : t.registerTab}
-            </button>
-          ))}
-        </div>
-
-        {/* Error message */}
-        {error && (
-          <div
-            className="mb-4 p-3 rounded-lg text-sm"
-            style={{
-              background: "oklch(0.4 0.15 25 / 15%)",
-              border:
-                "1px solid oklch(0.6 0.2 25 / 30%)",
-              color: "oklch(0.75 0.12 25)",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {/* Success message */}
-        {success && (
-          <div
-            className="mb-4 p-3 rounded-lg text-sm"
-            style={{
-              background: "oklch(0.4 0.15 145 / 15%)",
-              border:
-                "1px solid oklch(0.6 0.2 145 / 30%)",
-              color: "oklch(0.75 0.12 145)",
-            }}
-          >
-            {success}
-          </div>
-        )}
-
-        {/* ============ LOGIN TAB ============ */}
-        {activeTab === "login" && (
-          <>
-            <form
-              onSubmit={handleLogin}
-              className="space-y-4"
-            >
-              <div>
-                <label
-                  className="block text-xs font-medium mb-1.5"
-                  style={{ color: "oklch(0.6 0 0)" }}
-                >
-                  {t.email}
-                </label>
-                <input
-                  type="text"
-                  value={email}
-                  onChange={(e) =>
-                    setEmail(e.target.value)
-                  }
-                  placeholder={t.emailPlaceholder}
-                  autoComplete="email"
-                  className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
-                  style={inputStyle}
-                  onFocus={handleInputFocus}
-                  onBlur={handleInputBlur}
-                />
-              </div>
-
-              <div>
-                <label
-                  className="block text-xs font-medium mb-1.5"
-                  style={{ color: "oklch(0.6 0 0)" }}
-                >
-                  {t.password}
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) =>
-                    setPassword(e.target.value)
-                  }
-                  placeholder={t.passwordPlaceholder}
-                  autoComplete="current-password"
-                  className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
-                  style={inputStyle}
-                  onFocus={handleInputFocus}
-                  onBlur={handleInputBlur}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={loginDisabled}
-                className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background:
-                    "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
-                  color: "white",
-                  boxShadow:
-                    "0 4px 16px oklch(0.5 0.2 255 / 30%)",
-                }}
-                onMouseEnter={(e) => {
-                  if (!loading)
-                    e.currentTarget.style.transform =
-                      "translateY(-1px)"
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform =
-                    "translateY(0)"
-                }}
-              >
-                {loading ? "..." : t.login}
-              </button>
-            </form>
-
-            {/* Divider */}
-            <div className="flex items-center gap-4 my-6">
-              <div
-                className="flex-1 h-px"
-                style={{
-                  background: "oklch(1 0 0 / 8%)",
-                }}
+            {/* Logo — uses unified /logos/app-logo.png */}
+            <div className="flex flex-col items-center mb-6">
+              <img
+                src="/logos/app-logo.png"
+                alt="AI Workbench"
+                width={64}
+                height={64}
+                className="mb-4 rounded-2xl"
+                style={{ boxShadow: "0 8px 32px oklch(0.5 0.2 255 / 30%)" }}
               />
-              <span
-                className="text-xs"
-                style={{ color: "oklch(0.45 0 0)" }}
+              <h1
+                className="text-2xl font-bold tracking-tight"
+                style={{ color: "oklch(0.95 0 0)" }}
               >
-                {t.or}
-              </span>
-              <div
-                className="flex-1 h-px"
-                style={{
-                  background: "oklch(1 0 0 / 8%)",
-                }}
-              />
-            </div>
-
-            {/* Google OAuth button */}
-            <button
-              onClick={handleGoogleLogin}
-              className="w-full flex items-center justify-center gap-3 py-3 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer"
-              style={{
-                background: "oklch(0.97 0 0)",
-                color: "oklch(0.3 0 0)",
-                boxShadow:
-                  "0 2px 8px oklch(0 0 0 / 15%)",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background =
-                  "oklch(0.93 0 0)"
-                e.currentTarget.style.transform =
-                  "translateY(-1px)"
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  "oklch(0.97 0 0)"
-                e.currentTarget.style.transform =
-                  "translateY(0)"
-              }}
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 48 48"
-              >
-                <path
-                  fill="#EA4335"
-                  d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                />
-                <path
-                  fill="#4285F4"
-                  d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                />
-              </svg>
-              {t.googleLogin}
-            </button>
-
-          </>
-        )}
-
-        {/* ============ REGISTER TAB ============ */}
-        {activeTab === "register" && (
-          <form
-            onSubmit={handleRegister}
-            className="space-y-4"
-          >
-            <div>
-              <label
-                className="block text-xs font-medium mb-1.5"
-                style={{ color: "oklch(0.6 0 0)" }}
-              >
-                {t.email}
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={t.emailPlaceholder}
-                autoComplete="email"
-                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
-                style={inputStyle}
-                onFocus={handleInputFocus}
-                onBlur={handleInputBlur}
-              />
-              {emailIsDisposable && (
-                <p
-                  className="text-xs mt-1.5"
-                  style={{
-                    color: "oklch(0.7 0.15 25)",
-                  }}
-                >
-                  {t.disposableEmail}
-                </p>
-              )}
-              {emailIsInvalid && !emailIsDisposable && (
-                <p
-                  className="text-xs mt-1.5"
-                  style={{
-                    color: "oklch(0.7 0.15 25)",
-                  }}
-                >
-                  {t.invalidEmail}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label
-                className="block text-xs font-medium mb-1.5"
-                style={{ color: "oklch(0.6 0 0)" }}
-              >
-                {t.password}
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) =>
-                  setPassword(e.target.value)
-                }
-                placeholder={t.passwordPlaceholder}
-                autoComplete="new-password"
-                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
-                style={inputStyle}
-                onFocus={handleInputFocus}
-                onBlur={handleInputBlur}
-              />
+                {t.title}
+              </h1>
               <p
-                className="text-xs mt-1.5"
-                style={{
-                  color: passwordTooShort
-                    ? "oklch(0.7 0.15 25)"
-                    : "oklch(0.45 0 0)",
-                }}
+                className="text-sm mt-1"
+                style={{ color: "oklch(0.55 0 0)" }}
               >
-                {t.passwordHint}
+                {t.subtitle}
               </p>
             </div>
 
-            <div>
-              <label
-                className="block text-xs font-medium mb-1.5"
-                style={{ color: "oklch(0.6 0 0)" }}
-              >
-                {t.confirmPassword}
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) =>
-                  setConfirmPassword(e.target.value)
-                }
-                placeholder={t.confirmPasswordPlaceholder}
-                autoComplete="new-password"
-                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
-                style={inputStyle}
-                onFocus={handleInputFocus}
-                onBlur={handleInputBlur}
-              />
-              {passwordsMismatch && (
-                <p
-                  className="text-xs mt-1.5"
-                  style={{
-                    color: "oklch(0.7 0.15 25)",
-                  }}
-                >
-                  {t.passwordMismatch}
-                </p>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={registerDisabled}
-              className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            {/* Tabs */}
+            <div
+              className="flex mb-6 rounded-full p-1"
               style={{
-                background:
-                  "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
-                color: "white",
-                boxShadow:
-                  "0 4px 16px oklch(0.5 0.2 255 / 30%)",
-              }}
-              onMouseEnter={(e) => {
-                if (!loading)
-                  e.currentTarget.style.transform =
-                    "translateY(-1px)"
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform =
-                  "translateY(0)"
+                background: "oklch(0.1 0.008 265 / 60%)",
+                border: "1px solid oklch(1 0 0 / 6%)",
               }}
             >
-              {loading ? "..." : t.register}
-            </button>
-          </form>
-        )}
+              {(["login", "register"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setActiveTab(tab)
+                    setError("")
+                    setSuccess("")
+                  }}
+                  className="flex-1 py-2 rounded-full text-sm font-medium transition-all duration-200"
+                  style={{
+                    background:
+                      activeTab === tab
+                        ? "linear-gradient(135deg, oklch(0.6 0.2 255 / 20%), oklch(0.55 0.25 290 / 20%))"
+                        : "transparent",
+                    color:
+                      activeTab === tab
+                        ? "oklch(0.9 0 0)"
+                        : "oklch(0.5 0 0)",
+                    border:
+                      activeTab === tab
+                        ? "1px solid oklch(0.6 0.2 255 / 25%)"
+                        : "1px solid transparent",
+                  }}
+                >
+                  {tab === "login"
+                    ? t.loginTab
+                    : t.registerTab}
+                </button>
+              ))}
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div
+                className="mb-4 p-3 rounded-lg text-sm"
+                style={{
+                  background: "oklch(0.4 0.15 25 / 15%)",
+                  border:
+                    "1px solid oklch(0.6 0.2 25 / 30%)",
+                  color: "oklch(0.75 0.12 25)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            {/* Success message */}
+            {success && (
+              <div
+                className="mb-4 p-3 rounded-lg text-sm"
+                style={{
+                  background: "oklch(0.4 0.15 145 / 15%)",
+                  border:
+                    "1px solid oklch(0.6 0.2 145 / 30%)",
+                  color: "oklch(0.75 0.12 145)",
+                }}
+              >
+                {success}
+              </div>
+            )}
+
+            {/* ============ LOGIN TAB ============ */}
+            {activeTab === "login" && (
+              <>
+                <form
+                  onSubmit={handleLogin}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      className="block text-xs font-medium mb-1.5"
+                      style={{ color: "oklch(0.6 0 0)" }}
+                    >
+                      {t.email}
+                    </label>
+                    <input
+                      type="text"
+                      value={email}
+                      onChange={(e) =>
+                        setEmail(e.target.value)
+                      }
+                      placeholder={t.emailPlaceholder}
+                      autoComplete="email"
+                      className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
+                      style={inputStyle}
+                      onFocus={handleInputFocus}
+                      onBlur={handleInputBlur}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      className="block text-xs font-medium mb-1.5"
+                      style={{ color: "oklch(0.6 0 0)" }}
+                    >
+                      {t.password}
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) =>
+                        setPassword(e.target.value)
+                      }
+                      placeholder={t.passwordPlaceholder}
+                      autoComplete="current-password"
+                      className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
+                      style={inputStyle}
+                      onFocus={handleInputFocus}
+                      onBlur={handleInputBlur}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loginDisabled}
+                    className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
+                      color: "white",
+                      boxShadow:
+                        "0 4px 16px oklch(0.5 0.2 255 / 30%)",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!loading)
+                        e.currentTarget.style.transform =
+                          "translateY(-1px)"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform =
+                        "translateY(0)"
+                    }}
+                  >
+                    {loading ? "..." : t.login}
+                  </button>
+                </form>
+
+                {/* Divider */}
+                <div className="flex items-center gap-4 my-6">
+                  <div
+                    className="flex-1 h-px"
+                    style={{
+                      background: "oklch(1 0 0 / 8%)",
+                    }}
+                  />
+                  <span
+                    className="text-xs"
+                    style={{ color: "oklch(0.45 0 0)" }}
+                  >
+                    {t.or}
+                  </span>
+                  <div
+                    className="flex-1 h-px"
+                    style={{
+                      background: "oklch(1 0 0 / 8%)",
+                    }}
+                  />
+                </div>
+
+                {/* Google OAuth button */}
+                <button
+                  onClick={handleGoogleLogin}
+                  className="w-full flex items-center justify-center gap-3 py-3 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer"
+                  style={{
+                    background: "oklch(0.97 0 0)",
+                    color: "oklch(0.3 0 0)",
+                    boxShadow:
+                      "0 2px 8px oklch(0 0 0 / 15%)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background =
+                      "oklch(0.93 0 0)"
+                    e.currentTarget.style.transform =
+                      "translateY(-1px)"
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background =
+                      "oklch(0.97 0 0)"
+                    e.currentTarget.style.transform =
+                      "translateY(0)"
+                  }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 48 48"
+                  >
+                    <path
+                      fill="#EA4335"
+                      d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+                    />
+                    <path
+                      fill="#4285F4"
+                      d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+                    />
+                  </svg>
+                  {t.googleLogin}
+                </button>
+
+              </>
+            )}
+
+            {/* ============ REGISTER TAB ============ */}
+            {activeTab === "register" && (
+              <form
+                onSubmit={handleRegister}
+                className="space-y-4"
+              >
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-1.5"
+                    style={{ color: "oklch(0.6 0 0)" }}
+                  >
+                    {t.email}
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={t.emailPlaceholder}
+                    autoComplete="email"
+                    className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
+                    style={inputStyle}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                  />
+                  {emailIsDisposable && (
+                    <p
+                      className="text-xs mt-1.5"
+                      style={{
+                        color: "oklch(0.7 0.15 25)",
+                      }}
+                    >
+                      {t.disposableEmail}
+                    </p>
+                  )}
+                  {emailIsInvalid && !emailIsDisposable && (
+                    <p
+                      className="text-xs mt-1.5"
+                      style={{
+                        color: "oklch(0.7 0.15 25)",
+                      }}
+                    >
+                      {t.invalidEmail}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-1.5"
+                    style={{ color: "oklch(0.6 0 0)" }}
+                  >
+                    {t.password}
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) =>
+                      setPassword(e.target.value)
+                    }
+                    placeholder={t.passwordPlaceholder}
+                    autoComplete="new-password"
+                    className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
+                    style={inputStyle}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                  />
+                  <p
+                    className="text-xs mt-1.5"
+                    style={{
+                      color: passwordTooShort
+                        ? "oklch(0.7 0.15 25)"
+                        : "oklch(0.45 0 0)",
+                    }}
+                  >
+                    {t.passwordHint}
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-1.5"
+                    style={{ color: "oklch(0.6 0 0)" }}
+                  >
+                    {t.confirmPassword}
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) =>
+                      setConfirmPassword(e.target.value)
+                    }
+                    placeholder={t.confirmPasswordPlaceholder}
+                    autoComplete="new-password"
+                    className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
+                    style={inputStyle}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                  />
+                  {passwordsMismatch && (
+                    <p
+                      className="text-xs mt-1.5"
+                      style={{
+                        color: "oklch(0.7 0.15 25)",
+                      }}
+                    >
+                      {t.passwordMismatch}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={registerDisabled}
+                  className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
+                    color: "white",
+                    boxShadow:
+                      "0 4px 16px oklch(0.5 0.2 255 / 30%)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading)
+                      e.currentTarget.style.transform =
+                        "translateY(-1px)"
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform =
+                      "translateY(0)"
+                  }}
+                >
+                  {loading ? "..." : t.register}
+                </button>
+              </form>
+            )}
           </div>
         </LiquidGlass>
       </div>
