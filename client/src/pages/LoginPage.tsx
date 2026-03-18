@@ -115,7 +115,7 @@ function isValidEmail(email: string): boolean {
 const labels = {
   "zh-TW": {
     title: "AI Workbench",
-    subtitle: "Build your AI workspace easily",
+    subtitle: "Build your AI world",
     loginTab: "\u767b\u5165",
     registerTab: "\u8a3b\u518a",
     email: "\u4fe1\u7bb1",
@@ -152,7 +152,7 @@ const labels = {
   },
   en: {
     title: "AI Workbench",
-    subtitle: "Intelligent Workspace",
+    subtitle: "Build your AI world",
     loginTab: "Login",
     registerTab: "Register",
     email: "Email",
