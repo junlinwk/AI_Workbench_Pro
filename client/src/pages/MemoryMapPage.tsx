@@ -658,6 +658,10 @@ export default function MemoryMapPage() {
                     </linearGradient>
                   );
                 })}
+                {/* Clip path for user avatar circle */}
+                <clipPath id="user-avatar-clip">
+                  <circle r="17" />
+                </clipPath>
               </defs>
 
               {/* Grid pattern (subtle) */}
@@ -838,21 +842,42 @@ export default function MemoryMapPage() {
                       transform="translate(0.5, 0.5)"
                     />
 
-                    {/* Main circle */}
-                    <circle
-                      r={node.size / 2}
-                      fill={`url(#grad-${node.category})`}
-                      filter={isActive ? "url(#glow-strong)" : "url(#glow)"}
-                    />
+                    {/* Main circle — user node shows avatar */}
+                    {node.category === "user" && user?.avatar ? (
+                      <>
+                        <circle
+                          r={node.size / 2}
+                          fill={`url(#grad-${node.category})`}
+                          filter={isActive ? "url(#glow-strong)" : "url(#glow)"}
+                        />
+                        <image
+                          href={user.avatar}
+                          x={-node.size / 2}
+                          y={-node.size / 2}
+                          width={node.size}
+                          height={node.size}
+                          clipPath={`circle(${node.size / 2}px)`}
+                          style={{ borderRadius: "50%" }}
+                        />
+                      </>
+                    ) : (
+                      <circle
+                        r={node.size / 2}
+                        fill={`url(#grad-${node.category})`}
+                        filter={isActive ? "url(#glow-strong)" : "url(#glow)"}
+                      />
+                    )}
 
-                    {/* Glass highlight */}
-                    <ellipse
-                      cx={-node.size * 0.1}
-                      cy={-node.size * 0.15}
-                      rx={node.size * 0.25}
-                      ry={node.size * 0.12}
-                      fill="rgba(255,255,255,0.15)"
-                    />
+                    {/* Glass highlight (skip for user avatar) */}
+                    {node.category !== "user" && (
+                      <ellipse
+                        cx={-node.size * 0.1}
+                        cy={-node.size * 0.15}
+                        rx={node.size * 0.25}
+                        ry={node.size * 0.12}
+                        fill="rgba(255,255,255,0.15)"
+                      />
+                    )}
 
                     {/* Border ring */}
                     <circle
