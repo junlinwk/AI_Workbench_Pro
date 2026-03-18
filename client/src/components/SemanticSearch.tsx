@@ -517,11 +517,21 @@ function getExcerpt(content: string, maxLen = 160): string {
 function buildUserSearchDB(userId: string): SearchEntry[] {
   const entries: SearchEntry[] = [];
   try {
-    const convEntries = listUserDataByPattern(userId, "chat-");
+    // Search both old "chat-" namespaces and new "conv-messages:" namespaces
+    const convEntries = [
+      ...listUserDataByPattern(userId, "conv-messages:"),
+      ...listUserDataByPattern(userId, "chat-"),
+    ];
+    const seenIds = new Set<string>();
     for (const { namespace, data } of convEntries) {
       const messages = data as any[];
       if (!Array.isArray(messages) || messages.length === 0) continue;
-      const convId = namespace.replace(/.*chat-/, "");
+      // Extract conversation ID: "conv-messages:c-123" → "c-123", "chat-123" → "chat-123"
+      const convId = namespace.startsWith("conv-messages:")
+        ? namespace.slice("conv-messages:".length)
+        : namespace;
+      if (seenIds.has(convId)) continue;
+      seenIds.add(convId);
       const fullContent = messages.map((m: any) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`).join("\n\n");
       const firstUserMsg = messages.find((m: any) => m.role === "user");
       const title = firstUserMsg?.content?.slice(0, 60)?.replace(/\n/g, " ") || `Chat ${convId.slice(0, 8)}`;
@@ -632,12 +642,19 @@ export default function SemanticSearch() {
     return () => clearTimeout(timeout);
   }, [query, filter, sort, semanticMode]);
 
-  /* Jump handler */
+  /* Jump handler — navigate to conversation in Chat tab */
   const handleJump = useCallback(
     (id: string) => {
       setSelectedId(id);
-      previewRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-      toast.success(lang === "en" ? "Jumped to result" : "已跳轉至搜尋結果", {
+      // Switch to Chat tab with this conversation
+      window.dispatchEvent(
+        new CustomEvent("feature-switch", { detail: { feature: "chat" } }),
+      );
+      // Tell Sidebar to select this conversation
+      window.dispatchEvent(
+        new CustomEvent("select-conversation", { detail: { chatId: id } }),
+      );
+      toast.success(lang === "en" ? "Opening conversation..." : "正在開啟對話...", {
         duration: 1500,
       });
     },
@@ -645,13 +662,10 @@ export default function SemanticSearch() {
   );
 
   const handleOpenInChat = useCallback(() => {
-    toast.success(
-      lang === "en"
-        ? "Opening conversation in chat..."
-        : "正在聊天視窗中開啟對話...",
-      { duration: 2000 },
-    );
-  }, [lang]);
+    if (selectedId) {
+      handleJump(selectedId);
+    }
+  }, [selectedId, handleJump]);
 
   /* Filter / Sort options */
   const FILTERS: { key: FilterKey; label: string; labelEn: string }[] = [

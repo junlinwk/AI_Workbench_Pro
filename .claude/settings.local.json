@@ -11,7 +11,9 @@
       "Bash(pnpm add:*)",
       "Bash(ls:*)",
       "Bash(export PATH=\"$HOME/.local/share/pnpm:$HOME/.nvm/versions/node/*/bin:$PATH\")",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(grep -r \"voice\\\\|audio\\\\|speech\\\\|whisper\\\\|microphone\\\\|recording\" /home/claude/projects/Prjs107/dev/Personal-Optimized-AI-Webpage/client/src --include=*.tsx --include=*.ts)",
+      "Bash(grep -r \"voice\\\\|audio\\\\|speech\\\\|whisper\\\\|microphone\\\\|recording\" /home/claude/projects/Prjs107/dev/Personal-Optimized-AI-Webpage/api --include=*.ts)"
     ]
   }
 }

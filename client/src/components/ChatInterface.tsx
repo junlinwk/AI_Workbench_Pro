@@ -35,6 +35,10 @@ import {
   Pin,
   GitBranch,
   Brain,
+  Mic,
+  MicOff,
+  Volume2,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -48,7 +52,14 @@ import {
 } from "@/lib/storage"
 import { t } from "@/i18n"
 import { ALL_MODELS, MODEL_PROVIDERS, getAllModels } from "./ModelSwitcher"
-import { callAI } from "@/lib/aiClient"
+import { callAI, VISION_MODELS } from "@/lib/aiClient"
+import type { ContentPart, ChatMessage } from "@/lib/aiClient"
+import {
+  transcribeAudio,
+  textToSpeech,
+  browserTranscribe,
+  hasSpeechRecognition,
+} from "@/lib/audioClient"
 import {
   getVisibleMessages,
   getVisibleMemory,
@@ -86,6 +97,8 @@ export interface Message {
   citations?: Citation[]
   model?: string
   branchId: string
+  imageData?: string
+  imageMimeType?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +144,7 @@ function MessageBubble({
   lang,
   conversationId,
   effectiveUserId,
+  groqApiKey,
 }: {
   message: Message
   showAvatar: boolean
@@ -141,11 +155,13 @@ function MessageBubble({
   lang: "zh-TW" | "en"
   conversationId?: string
   effectiveUserId: string
+  groqApiKey?: string
 }) {
   const [copied, setCopied] = useState(false)
   const [feedback, setFeedback] = useState<"up" | "down" | null>(
     null,
   )
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const isUser = message.role === "user"
 
   const handleCopy = () => {
@@ -153,6 +169,22 @@ function MessageBubble({
     setCopied(true)
     toast.success(t("chat.copiedToClipboard", lang))
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleSpeak = async () => {
+    if (isSpeaking) {
+      window.speechSynthesis?.cancel()
+      setIsSpeaking(false)
+      return
+    }
+    setIsSpeaking(true)
+    try {
+      await textToSpeech(message.content, groqApiKey)
+    } catch {
+      // silent fail
+    } finally {
+      setIsSpeaking(false)
+    }
   }
 
   const model = message.model
@@ -236,6 +268,14 @@ function MessageBubble({
               : "pl-6 pr-4 bg-white/5 border border-white/8 text-white/85 rounded-tl-sm",
           )}
         >
+          {/* Attached image */}
+          {message.imageData && message.imageMimeType && (
+            <img
+              src={`data:${message.imageMimeType};base64,${message.imageData}`}
+              alt="Attached"
+              className="max-w-xs max-h-48 rounded-lg mb-2 border border-white/10"
+            />
+          )}
           <div
             className="prose prose-invert prose-sm max-w-none
             prose-headings:text-white/90 prose-headings:font-semibold
@@ -297,6 +337,22 @@ function MessageBubble({
                 {copied
                   ? t("chat.copied", lang)
                   : t("chat.copy", lang)}
+              </span>
+            </button>
+            <button
+              onClick={handleSpeak}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 rounded-lg transition-colors",
+                isSpeaking
+                  ? "text-blue-400 bg-blue-500/10"
+                  : "text-white/30 hover:text-white/60 hover:bg-white/5",
+              )}
+            >
+              <Volume2 size={11} />
+              <span className="text-[10px]">
+                {isSpeaking
+                  ? (lang === "en" ? "Stop" : "停止")
+                  : (lang === "en" ? "Speak" : "朗讀")}
               </span>
             </button>
             <button
@@ -936,6 +992,16 @@ export default function ChatInterface({
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [urlInput, setUrlInput] = useState("")
+  // Image upload state
+  const [pendingImage, setPendingImage] = useState<{
+    base64: string
+    mimeType: string
+    preview: string
+  } | null>(null)
+  // Voice state
+  const [isRecording, setIsRecording] = useState(false)
+  const [voiceMode, setVoiceMode] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -1079,18 +1145,99 @@ export default function ChatInterface({
     ? getApiKey(currentModel.providerId)
     : undefined
   const canSend = hasApiKey(currentModel?.providerId || "")
+  // Groq API key for voice features (STT/TTS)
+  const groqApiKey = getApiKey("groq") || getApiKey("meta")
 
   const handleChipClick = useCallback((text: string) => {
     setInput(text)
     textareaRef.current?.focus()
   }, [])
 
+  // ── Voice recording ──
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
+      const chunks: Blob[] = []
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data)
+      }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunks, { type: "audio/webm" })
+        setIsRecording(false)
+
+        // Transcribe
+        toast.info(lang === "en" ? "Transcribing..." : "轉錄中...", { duration: 2000 })
+        try {
+          let text = ""
+          if (groqApiKey) {
+            text = await transcribeAudio(blob, groqApiKey)
+          } else if (hasSpeechRecognition()) {
+            text = await browserTranscribe()
+          } else {
+            toast.error(
+              lang === "en"
+                ? "No Groq API key set for voice. Add one in Settings."
+                : "尚未設定 Groq API Key，請在設定中新增。",
+            )
+            return
+          }
+          if (text) {
+            setInput((prev) => (prev ? prev + " " + text : text))
+            textareaRef.current?.focus()
+          }
+        } catch {
+          toast.error(lang === "en" ? "Transcription failed" : "語音轉錄失敗")
+        }
+      }
+
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+    } catch {
+      toast.error(
+        lang === "en"
+          ? "Microphone access denied"
+          : "麥克風存取被拒絕",
+      )
+    }
+  }, [groqApiKey, lang])
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop()
+    }
+  }, [])
+
+  // ── Image upload handler ──
+  const handleImageUpload = useCallback((file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      const base64 = dataUrl.split(",")[1] || ""
+      setPendingImage({
+        base64,
+        mimeType: file.type || "image/png",
+        preview: dataUrl,
+      })
+      toast.success(
+        lang === "en" ? `Image attached: ${file.name}` : `圖片已附加：${file.name}`,
+      )
+    }
+    reader.readAsDataURL(file)
+  }, [lang])
+
   const handleSend = async () => {
     if (isMergedBranch) return // Merged branches are read-only
     const trimmed = input.trim()
-    if (!trimmed) return
+    if (!trimmed && !pendingImage) return
 
-    const sanitized = sanitizeText(trimmed, 4096)
+    const sanitized = sanitizeText(trimmed || (lang === "en" ? "What's in this image?" : "這張圖片裡有什麼？"), 4096)
+
+    // Capture and clear pending image
+    const currentImage = pendingImage
+    setPendingImage(null)
 
     if (!canSend || !apiKey) {
       toast.error(
@@ -1099,6 +1246,16 @@ export default function ChatInterface({
           : `請先在設定 → 模型與 API 中設定 ${currentProvider?.name || "模型"} 的 API Key。`,
       )
       return
+    }
+
+    // Warn if image attached but model doesn't support vision
+    if (currentImage && !VISION_MODELS.has(settings.selectedModelId)) {
+      toast.warning(
+        lang === "en"
+          ? "Current model may not support images. Consider switching to a vision model (GPT-4o, Claude, Gemini, Llama 4 Scout)."
+          : "目前的模型可能不支援圖片。建議切換到視覺模型（GPT-4o、Claude、Gemini、Llama 4 Scout）。",
+        { duration: 4000 },
+      )
     }
 
     // Per-branch temperature override
@@ -1114,6 +1271,10 @@ export default function ChatInterface({
         minute: "2-digit",
       }),
       branchId: activeBranchId,
+      ...(currentImage && {
+        imageData: currentImage.base64,
+        imageMimeType: currentImage.mimeType,
+      }),
     }
     setAllMessages((prev) => [...prev, userMsg])
     setInput("")
@@ -1340,11 +1501,24 @@ export default function ChatInterface({
       const abort = new AbortController()
       abortRef.current = abort
 
-      const chatHistory = visibleMessages.map((m) => ({
+      const chatHistory: ChatMessage[] = visibleMessages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.imageData && m.imageMimeType
+          ? [
+              { type: "text" as const, text: m.content },
+              { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
+            ]
+          : m.content,
       }))
-      chatHistory.push({ role: "user", content: userMsg.content })
+      chatHistory.push({
+        role: "user",
+        content: currentImage
+          ? [
+              { type: "text" as const, text: userMsg.content },
+              { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
+            ]
+          : userMsg.content,
+      })
 
       const aiPromise = callAI(
         chatHistory,
@@ -1386,6 +1560,15 @@ export default function ChatInterface({
 
       // Extract code blocks and send to Artifacts panel
       extractAndDispatchCodeBlocks(response)
+
+      // Voice mode: speak the response and re-trigger recording
+      if (voiceMode && groqApiKey) {
+        textToSpeech(response.slice(0, 2000), groqApiKey)
+          .then(() => {
+            if (voiceMode) startRecording()
+          })
+          .catch(() => {})
+      }
 
       // Extract conversation memory in background
       extractMemoryInBackground(
@@ -1787,6 +1970,7 @@ export default function ChatInterface({
                   lang={lang}
                   conversationId={conversationId}
                   effectiveUserId={effectiveUserId}
+                  groqApiKey={groqApiKey}
                 />
               </div>
             ))}
@@ -1881,13 +2065,16 @@ export default function ChatInterface({
                           ev.target as HTMLInputElement
                         ).files?.[0]
                         if (file) {
-                          toast.success(
-                            lang === "en"
-                              ? `Selected: ${file.name}`
-                              : `已選取：${file.name}`,
-                          )
-                          // Read text files and append to input
-                          if (item.accept !== "image/*") {
+                          if (item.accept === "image/*") {
+                            // Image upload → base64 for vision
+                            handleImageUpload(file)
+                          } else {
+                            toast.success(
+                              lang === "en"
+                                ? `Selected: ${file.name}`
+                                : `已選取：${file.name}`,
+                            )
+                            // Read text files and append to input
                             const reader = new FileReader()
                             reader.onload = () => {
                               const content =
@@ -1915,6 +2102,28 @@ export default function ChatInterface({
                 ))}
               </div>
             </>
+          )}
+
+          {/* Pending image preview */}
+          {pendingImage && (
+            <div className="px-3 pt-3 flex items-start gap-2">
+              <div className="relative">
+                <img
+                  src={pendingImage.preview}
+                  alt="Preview"
+                  className="w-20 h-20 object-cover rounded-lg border border-white/10"
+                />
+                <button
+                  onClick={() => setPendingImage(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500/90 flex items-center justify-center text-white hover:bg-red-400 transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+              <span className="text-[10px] text-white/30 mt-1">
+                {lang === "en" ? "Image attached" : "已附加圖片"}
+              </span>
+            </div>
           )}
 
           <div className="flex items-end gap-2 p-3">
@@ -1982,6 +2191,53 @@ export default function ChatInterface({
               <Code2 size={16} />
             </button>
 
+            {/* Mic button */}
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              className={cn(
+                "p-2 rounded-xl transition-all duration-150 shrink-0",
+                isRecording
+                  ? "bg-red-500/20 text-red-400 animate-pulse"
+                  : "text-white/30 hover:text-white/60 hover:bg-white/8",
+              )}
+              title={
+                isRecording
+                  ? (lang === "en" ? "Stop recording" : "停止錄音")
+                  : (lang === "en" ? "Voice input" : "語音輸入")
+              }
+            >
+              {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+
+            {/* Voice conversation mode toggle */}
+            <button
+              onClick={() => {
+                const next = !voiceMode
+                setVoiceMode(next)
+                if (next) {
+                  toast.info(
+                    lang === "en"
+                      ? "Voice mode ON — speak → AI responds → reads aloud → listens again"
+                      : "語音對話模式 ON — 說話 → AI 回覆 → 朗讀 → 繼續聆聽",
+                    { duration: 3000 },
+                  )
+                  startRecording()
+                } else {
+                  stopRecording()
+                  window.speechSynthesis?.cancel()
+                }
+              }}
+              className={cn(
+                "p-2 rounded-xl transition-all duration-150 shrink-0",
+                voiceMode
+                  ? "bg-violet-500/20 text-violet-400"
+                  : "text-white/30 hover:text-white/60 hover:bg-white/8",
+              )}
+              title={lang === "en" ? "Voice conversation mode" : "語音對話模式"}
+            >
+              <Volume2 size={16} />
+            </button>
+
             {isTyping ? (
               <button
                 onClick={handleStop}
@@ -1992,10 +2248,10 @@ export default function ChatInterface({
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() && !pendingImage}
                 className={cn(
                   "p-2 rounded-xl transition-all duration-150 shrink-0",
-                  input.trim()
+                  input.trim() || pendingImage
                     ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/40"
                     : "text-white/20 bg-white/5 cursor-not-allowed",
                 )}

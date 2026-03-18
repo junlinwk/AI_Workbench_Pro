@@ -3,11 +3,100 @@
  *
  * Extracted from ChatInterface so that other components (Notepad, TaskDAG, etc.)
  * can call AI models without duplicating provider-specific logic.
+ *
+ * Supports multimodal messages (text + image) via ContentPart arrays.
  */
 import { ALL_MODELS, MODEL_PROVIDERS } from "@/components/ModelSwitcher"
 
+/** Vision-capable models that accept image inputs */
+export const VISION_MODELS = new Set([
+  // OpenAI
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+  // Anthropic
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+  // Google
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3-flash-preview",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  // Groq (vision)
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  // OpenRouter vision models
+  "openai/gpt-4o",
+  "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-opus-4-6",
+  "google/gemini-2.5-pro",
+])
+
+export interface ImageAttachment {
+  base64: string // base64 data (without data:... prefix)
+  mimeType: string // e.g. "image/png"
+}
+
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; base64: string; mimeType: string }
+
+export type MessageContent = string | ContentPart[]
+
+export interface ChatMessage {
+  role: string
+  content: MessageContent
+}
+
+/** Convert ContentPart[] to OpenAI/Groq multimodal format */
+function toOpenAIContent(content: MessageContent) {
+  if (typeof content === "string") return content
+  return content.map((part) => {
+    if (part.type === "text") return { type: "text" as const, text: part.text }
+    return {
+      type: "image_url" as const,
+      image_url: { url: `data:${part.mimeType};base64,${part.base64}` },
+    }
+  })
+}
+
+/** Convert ContentPart[] to Anthropic multimodal format */
+function toAnthropicContent(content: MessageContent) {
+  if (typeof content === "string") return content
+  return content.map((part) => {
+    if (part.type === "text") return { type: "text" as const, text: part.text }
+    return {
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: part.mimeType,
+        data: part.base64,
+      },
+    }
+  })
+}
+
+/** Convert ContentPart[] to Google Gemini multimodal format */
+function toGoogleParts(content: MessageContent) {
+  if (typeof content === "string") return [{ text: content }]
+  return content.map((part) => {
+    if (part.type === "text") return { text: part.text }
+    return { inline_data: { mime_type: part.mimeType, data: part.base64 } }
+  })
+}
+
+/** Get plain text from message content (for non-vision fallbacks) */
+function getTextContent(content: MessageContent): string {
+  if (typeof content === "string") return content
+  return content
+    .filter((p) => p.type === "text")
+    .map((p) => (p as { type: "text"; text: string }).text)
+    .join("\n")
+}
+
 export async function callAI(
-  messages: { role: string; content: string }[],
+  messages: ChatMessage[],
   modelId: string,
   apiKey: string,
   temperature: number,
@@ -24,11 +113,6 @@ export async function callAI(
     intelligence: 3,
     contextWindow: "",
   }
-
-  const sysMessages = systemPrompt
-    ? [{ role: "system", content: systemPrompt }]
-    : []
-  const allMessages = [...sysMessages, ...messages]
 
   let endpoint: string
   let headers: Record<string, string>
@@ -49,6 +133,15 @@ export async function callAI(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       }
+      const allMessages = [
+        ...(systemPrompt
+          ? [{ role: "system", content: systemPrompt }]
+          : []),
+        ...messages.map((m) => ({
+          role: m.role,
+          content: toOpenAIContent(m.content),
+        })),
+      ]
       body = {
         model: modelId,
         messages: allMessages,
@@ -67,7 +160,7 @@ export async function callAI(
       }
       const anthropicMessages = messages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: toAnthropicContent(m.content),
       }))
       body = {
         model: modelId,
@@ -87,7 +180,7 @@ export async function callAI(
       body = {
         contents: messages.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
+          parts: toGoogleParts(m.content),
         })),
         generationConfig: {
           temperature,
@@ -99,16 +192,26 @@ export async function callAI(
       }
       break
     }
-    case "meta": {
-      // Via Groq
+    case "meta":
+    case "groq": {
+      // Both route through Groq API
       endpoint = "https://api.groq.com/openai/v1/chat/completions"
       headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       }
+      const groqMessages = [
+        ...(systemPrompt
+          ? [{ role: "system", content: systemPrompt }]
+          : []),
+        ...messages.map((m) => ({
+          role: m.role,
+          content: toOpenAIContent(m.content),
+        })),
+      ]
       body = {
         model: modelId,
-        messages: allMessages,
+        messages: groqMessages,
         temperature,
         max_tokens: maxTokens,
       }
@@ -120,9 +223,18 @@ export async function callAI(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       }
+      const mistralMessages = [
+        ...(systemPrompt
+          ? [{ role: "system", content: systemPrompt }]
+          : []),
+        ...messages.map((m) => ({
+          role: m.role,
+          content: getTextContent(m.content),
+        })),
+      ]
       body = {
         model: modelId,
-        messages: allMessages,
+        messages: mistralMessages,
         temperature,
         max_tokens: maxTokens,
       }
@@ -136,9 +248,18 @@ export async function callAI(
         "HTTP-Referer": window.location.origin,
         "X-OpenRouter-Title": "AI Workbench",
       }
+      const orMessages = [
+        ...(systemPrompt
+          ? [{ role: "system", content: systemPrompt }]
+          : []),
+        ...messages.map((m) => ({
+          role: m.role,
+          content: toOpenAIContent(m.content),
+        })),
+      ]
       body = {
         model: modelId,
-        messages: allMessages,
+        messages: orMessages,
         temperature,
         max_tokens: maxTokens,
       }

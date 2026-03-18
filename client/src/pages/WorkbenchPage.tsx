@@ -110,6 +110,19 @@ export default function WorkbenchPage() {
     return () => window.removeEventListener("feature-switch", handler);
   }, []);
 
+  // Listen for select-conversation events (from Semantic Search jump)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.chatId) {
+        setActiveConversationId(detail.chatId);
+        setActiveFeature("chat");
+      }
+    };
+    window.addEventListener("select-conversation", handler);
+    return () => window.removeEventListener("select-conversation", handler);
+  }, []);
+
   const handleFeatureChange = (tab: FeatureTab) => {
     setActiveFeature(tab);
     if (tab === "artifacts") setArtifactsOpen(true);

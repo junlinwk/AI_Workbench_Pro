@@ -32,6 +32,8 @@ export interface Message {
   citations?: any[]
   model?: string
   branchId: string
+  imageData?: string
+  imageMimeType?: string
 }
 
 export interface MemoryEntry {

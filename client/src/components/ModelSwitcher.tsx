@@ -5,7 +5,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronDown, Check, Key, AlertCircle, Sparkles, Plus
+  ChevronDown, ChevronRight, Check, Key, AlertCircle, Sparkles, Plus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, type CustomModel } from "@/contexts/SettingsContext";
@@ -27,12 +27,21 @@ export interface ModelProvider {
   id: string;
   name: string;
   icon: string;
+  darkIcon?: string;
   keyPlaceholder: string;
   models: AIModel[];
 }
 
-/** Render provider logo from /logos/{icon}.svg */
-export function ProviderIcon({ icon, size = 20, className }: { icon: string; size?: number; className?: string }) {
+/** Render provider logo from /logos/{icon}.svg — supports dark/light variant */
+export function ProviderIcon({ icon, darkIcon, size = 20, className }: { icon: string; darkIcon?: string; size?: number; className?: string }) {
+  if (darkIcon) {
+    return (
+      <>
+        <img src={`/logos/${darkIcon}.svg`} alt="" width={size} height={size} className={cn("dark:block hidden", className)} style={{ width: size, height: size, objectFit: "contain" }} />
+        <img src={`/logos/${icon}.svg`} alt="" width={size} height={size} className={cn("dark:hidden block", className)} style={{ width: size, height: size, objectFit: "contain" }} />
+      </>
+    );
+  }
   return <img src={`/logos/${icon}.svg`} alt="" width={size} height={size} className={className} style={{ width: size, height: size, objectFit: "contain" }} />;
 }
 
@@ -93,6 +102,21 @@ export const MODEL_PROVIDERS: ModelProvider[] = [
       { id: "llama-4-maverick", name: "Llama 4 Maverick", providerId: "meta", description: "Meta 最新 400B MoE 模型", speed: 3, intelligence: 5, badge: "New", badgeColor: "bg-violet-500/20 text-violet-400 border-violet-500/30", contextWindow: "1M" },
       { id: "llama-4-scout", name: "Llama 4 Scout", providerId: "meta", description: "109B 高效多語言模型", speed: 4, intelligence: 4, contextWindow: "10M" },
       { id: "llama-3.3-70b", name: "Llama 3.3 70B", providerId: "meta", description: "成熟穩定的開源模型", speed: 4, intelligence: 4, contextWindow: "128K" },
+    ],
+  },
+  {
+    id: "groq",
+    name: "Groq",
+    icon: "groq-light",
+    darkIcon: "groq-dark",
+    keyPlaceholder: "gsk_...",
+    models: [
+      { id: "openai/gpt-oss-120b", name: "GPT OSS 120B", providerId: "groq", description: "開源 GPT 120B 大模型", speed: 4, intelligence: 5, badge: "New", badgeColor: "bg-violet-500/20 text-violet-400 border-violet-500/30", contextWindow: "128K" },
+      { id: "openai/gpt-oss-20b", name: "GPT OSS 20B", providerId: "groq", description: "輕量開源 GPT 模型", speed: 5, intelligence: 3, badge: "高效", badgeColor: "bg-blue-500/20 text-blue-400 border-blue-500/30", contextWindow: "128K" },
+      { id: "qwen/qwen3-32b", name: "Qwen 3 32B", providerId: "groq", description: "阿里通義千問最新模型", speed: 5, intelligence: 4, contextWindow: "128K" },
+      { id: "moonshotai/kimi-k2-instruct-0905", name: "Kimi K2", providerId: "groq", description: "月之暗面指令模型", speed: 4, intelligence: 4, badge: "New", badgeColor: "bg-violet-500/20 text-violet-400 border-violet-500/30", contextWindow: "128K" },
+      { id: "meta-llama/llama-4-scout-17b-16e-instruct", name: "Llama 4 Scout", providerId: "groq", description: "Meta 視覺多模態模型", speed: 4, intelligence: 4, badge: "Vision", badgeColor: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", contextWindow: "128K" },
+      { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", providerId: "groq", description: "成熟穩定的開源模型", speed: 4, intelligence: 4, contextWindow: "128K" },
     ],
   },
   {
@@ -167,6 +191,30 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
+
+  // Auto-expand provider of the currently selected model
+  useEffect(() => {
+    const allModels = getAllModels(settings.customModels);
+    const model = allModels.find(m => m.id === settings.selectedModelId);
+    if (model) {
+      setExpandedProviders(prev => {
+        if (prev.has(model.providerId)) return prev;
+        const next = new Set(prev);
+        next.add(model.providerId);
+        return next;
+      });
+    }
+  }, [settings.selectedModelId, settings.customModels]);
+
+  const toggleProvider = (providerId: string) => {
+    setExpandedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
+      return next;
+    });
+  };
 
   const lang = settings.language;
   const allModels = getAllModels(settings.customModels);
@@ -240,7 +288,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
         )}
       >
         <div className="flex items-center gap-1.5">
-          {selectedProvider ? <ProviderIcon icon={selectedProvider.icon} size={18} /> : <span className="text-sm">🔧</span>}
+          {selectedProvider ? <ProviderIcon icon={selectedProvider.icon} darkIcon={selectedProvider.darkIcon} size={18} /> : <span className="text-sm">🔧</span>}
           <span className="text-sm font-medium">{selectedModel.name}</span>
         </div>
         {!hasKey && !settings.customModels.some(cm => cm.id === selectedModel.id) && (
@@ -270,27 +318,35 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
             <div className="overflow-y-auto flex-1 p-2 space-y-2">
               {MODEL_PROVIDERS.map(provider => {
                 const providerHasKey = hasApiKey(provider.id);
+                const isExpanded = expandedProviders.has(provider.id);
                 return (
                   <div key={provider.id}>
-                    {/* Provider group header */}
-                    <div className="flex items-center gap-2 px-3 py-1.5">
-                      <ProviderIcon icon={provider.icon} size={16} />
+                    {/* Provider group header — clickable to expand/collapse */}
+                    <button
+                      onClick={() => toggleProvider(provider.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      {isExpanded ? <ChevronDown size={12} className="text-white/30" /> : <ChevronRight size={12} className="text-white/30" />}
+                      <ProviderIcon icon={provider.icon} darkIcon={provider.darkIcon} size={16} />
                       <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">{provider.name}</span>
+                      {!isExpanded && (
+                        <span className="text-[10px] text-white/20 ml-1">({provider.models.length})</span>
+                      )}
                       {!providerHasKey && (
-                        <button
-                          onClick={() => { onOpenSettings?.(); setOpen(false); }}
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onOpenSettings?.(); setOpen(false); }}
                           className="ml-auto flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors"
                         >
                           <Key size={9} />
                           <span>{t("model.needApiKey", lang)}</span>
-                        </button>
+                        </span>
                       )}
                       {providerHasKey && (
                         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       )}
-                    </div>
-                    {/* Models */}
-                    <div className="space-y-0.5">
+                    </button>
+                    {/* Models — shown when expanded */}
+                    {isExpanded && <div className="space-y-0.5">
                       {provider.models.map(model => {
                         const isSelected = settings.selectedModelId === model.id;
                         return (
@@ -343,7 +399,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                           </button>
                         );
                       })}
-                    </div>
+                    </div>}
                   </div>
                 );
               })}

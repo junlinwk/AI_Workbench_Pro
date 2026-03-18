@@ -1,0 +1,61 @@
+🚀 Groq 模型對應清單 (2026-03-18)
+REASONING (推理類)
+GPT OSS 120B
+ID: openai/gpt-oss-120b
+GPT OSS 20B
+ID: openai/gpt-oss-20b
+Qwen 3 32B
+ID: qwen/qwen3-32b
+FUNCTION CALLING / TOOL USE (工具調用類)
+GPT OSS 120B
+ID: openai/gpt-oss-120b
+GPT OSS 20B
+ID: openai/gpt-oss-20b
+Llama 4 Scout
+ID: meta-llama/llama-4-scout-17b-16e-instruct
+Qwen 3 32B
+ID: qwen/qwen3-32b
+Kimi K2
+ID: moonshotai/kimi-k2-instruct-0905
+TEXT TO SPEECH (語音合成類)
+ElevenLabs TTS
+ID: elevenlabs/tts (註：截圖中未顯示完整 ID，通常需配合 API Key 使用)
+Orpheus English
+ID: canopylabs/orpheus-v1-english
+Orpheus Arabic Saudi
+ID: canopylabs/orpheus-arabic-saudi
+SPEECH TO TEXT (語音轉文字類)
+Whisper Large v3
+ID: whisper-large-v3
+Whisper Large v3 Turbo
+ID: whisper-large-v3-turbo
+TEXT TO TEXT (一般文本類)
+GPT OSS 120B
+ID: openai/gpt-oss-120b
+GPT OSS 20B
+ID: openai/gpt-oss-20b
+Kimi K2
+ID: moonshotai/kimi-k2-instruct-0905
+Llama 4 Scout
+ID: meta-llama/llama-4-scout-17b-16e-instruct
+Llama 3.3 70B
+ID: llama-3.3-70b-versatile
+VISION (視覺辨識類)
+Llama 4 Scout
+ID: meta-llama/llama-4-scout-17b-16e-instruct
+MULTILINGUAL (多國語言類)
+GPT OSS 120B
+ID: openai/gpt-oss-120b
+GPT OSS 20B
+ID: openai/gpt-oss-20b
+Kimi K2
+ID: moonshotai/kimi-k2-instruct-0905
+Llama 4 Scout
+ID: meta-llama/llama-4-scout-17b-16e-instruct
+Llama 3.3 70B
+ID: llama-3.3-70b-versatile
+Whisper Large v3
+ID: whisper-large-v3
+SAFETY / CONTENT MODERATION (安全與審核類)
+Safety GPT OSS 20B
+ID: openai/gpt-oss-safeguard-20b

@@ -487,7 +487,7 @@ function ModelsTab() {
           <div key={provider.id} className="rounded-xl border border-white/8 bg-white/3 overflow-hidden">
             {/* Provider Header */}
             <div className="flex items-center gap-3 px-4 py-3">
-              <ProviderIcon icon={provider.icon} size={24} />
+              <ProviderIcon icon={provider.icon} darkIcon={provider.darkIcon} size={24} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-white/85">{provider.name}</span>
