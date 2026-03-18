@@ -130,9 +130,6 @@ importers:
       input-otp:
         specifier: ^1.4.2
         version: 1.4.2(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
-      liquid-glass-react:
-        specifier: link:liquid-glass-react-master
-        version: link:liquid-glass-react-master
       lucide-react:
         specifier: ^0.453.0
         version: 0.453.0(react@19.2.1)

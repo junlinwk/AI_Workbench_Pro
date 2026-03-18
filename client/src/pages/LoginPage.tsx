@@ -10,7 +10,7 @@
  */
 import React, { useState, useMemo, useRef, Suspense, lazy } from "react"
 import { useAuth } from "@/contexts/AuthContext"
-import LiquidGlass from "liquid-glass-react"
+import LiquidGlass from "@liquid-glass"
 
 const Hyperspeed = lazy(() => import("@/components/Hyperspeed"))
 

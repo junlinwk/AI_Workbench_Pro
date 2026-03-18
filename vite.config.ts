@@ -397,6 +397,7 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "client", "src"),
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "@liquid-glass": path.resolve(import.meta.dirname, "liquid-glass-react-master", "src", "index.tsx"),
     },
   },
   envDir: path.resolve(import.meta.dirname),
