@@ -527,14 +527,22 @@ export function SettingsProvider({
 
   const getApiKey = useCallback(
     (provider: string) => {
-      return settings.apiKeys[provider]
+      if (settings.apiKeys[provider]) return settings.apiKeys[provider]
+      // Groq and Meta share the same Groq API endpoint/key
+      if (provider === "groq") return settings.apiKeys["meta"]
+      if (provider === "meta") return settings.apiKeys["groq"]
+      return undefined
     },
     [settings.apiKeys],
   )
 
   const hasApiKey = useCallback(
     (provider: string) => {
-      return !!settings.apiKeys[provider]
+      if (settings.apiKeys[provider]) return true
+      // Groq and Meta share the same Groq API endpoint/key
+      if (provider === "groq") return !!settings.apiKeys["meta"]
+      if (provider === "meta") return !!settings.apiKeys["groq"]
+      return false
     },
     [settings.apiKeys],
   )

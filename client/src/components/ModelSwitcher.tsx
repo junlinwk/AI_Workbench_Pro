@@ -95,7 +95,7 @@ export const MODEL_PROVIDERS: ModelProvider[] = [
   },
   {
     id: "meta",
-    name: "Meta (via Groq/Together)",
+    name: "Meta",
     icon: "meta",
     keyPlaceholder: "gsk_... / ...",
     models: [
@@ -282,9 +282,10 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
         onClick={handleToggle}
         className={cn(
           "flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all duration-200",
-          "bg-white/5 hover:bg-white/8 border border-white/10 hover:border-white/15",
-          "backdrop-blur-sm text-white/80 hover:text-white",
-          open && "bg-white/8 border-white/15"
+          "dark:bg-white/5 dark:hover:bg-white/8 dark:border-white/10 dark:hover:border-white/15",
+          "bg-gray-100 hover:bg-gray-200 border border-gray-200 hover:border-gray-300",
+          "backdrop-blur-sm dark:text-white/80 dark:hover:text-white text-gray-700 hover:text-gray-900",
+          open && "dark:bg-white/8 dark:border-white/15 bg-gray-200 border-gray-300"
         )}
       >
         <div className="flex items-center gap-1.5">
@@ -299,7 +300,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
             {selectedModel.badge}
           </span>
         )}
-        <ChevronDown size={14} className={cn("text-white/40 transition-transform duration-200", open && "rotate-180")} />
+        <ChevronDown size={14} className={cn("text-gray-400 dark:text-white/40 transition-transform duration-200", open && "rotate-180")} />
       </button>
 
       {open && createPortal(
@@ -308,9 +309,9 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
           <div
             className={cn(
               "fixed w-80 z-[100] max-h-[70vh] flex flex-col",
-              "rounded-2xl border border-white/10 overflow-hidden",
-              "bg-[oklch(0.10_0.015_265)]/98 backdrop-blur-2xl",
-              "shadow-2xl shadow-black/80",
+              "rounded-2xl border overflow-hidden backdrop-blur-2xl",
+              "dark:border-white/10 dark:bg-[oklch(0.10_0.015_265)]/98 dark:shadow-2xl dark:shadow-black/80",
+              "border-gray-200 bg-white/98 shadow-xl shadow-black/10",
               "animate-in fade-in-0 slide-in-from-top-1 duration-150"
             )}
             style={{ top: dropdownPos.top, left: dropdownPos.left }}
@@ -324,13 +325,13 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                     {/* Provider group header — clickable to expand/collapse */}
                     <button
                       onClick={() => toggleProvider(provider.id)}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 dark:hover:bg-white/5 hover:bg-gray-100 transition-colors"
                     >
-                      {isExpanded ? <ChevronDown size={12} className="text-white/30" /> : <ChevronRight size={12} className="text-white/30" />}
+                      {isExpanded ? <ChevronDown size={12} className="text-gray-400 dark:text-white/30" /> : <ChevronRight size={12} className="text-gray-400 dark:text-white/30" />}
                       <ProviderIcon icon={provider.icon} darkIcon={provider.darkIcon} size={16} />
-                      <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">{provider.name}</span>
+                      <span className="text-[11px] font-semibold text-gray-400 dark:text-white/40 uppercase tracking-wider">{provider.name}</span>
                       {!isExpanded && (
-                        <span className="text-[10px] text-white/20 ml-1">({provider.models.length})</span>
+                        <span className="text-[10px] text-gray-300 dark:text-white/20 ml-1">({provider.models.length})</span>
                       )}
                       {!providerHasKey && (
                         <span
@@ -358,13 +359,13 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                               isSelected
                                 ? "bg-blue-600/15 border border-blue-500/20"
                                 : providerHasKey
-                                  ? "hover:bg-white/5 border border-transparent"
+                                  ? "dark:hover:bg-white/5 hover:bg-gray-50 border border-transparent"
                                   : "opacity-50 border border-transparent"
                             )}
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-0.5">
-                                <span className={cn("text-sm font-semibold", isSelected ? "text-white" : "text-white/80")}>
+                                <span className={cn("text-sm font-semibold", isSelected ? "text-gray-900 dark:text-white" : "text-gray-700 dark:text-white/80")}>
                                   {model.name}
                                 </span>
                                 {model.badge && (
@@ -372,12 +373,12 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                                     {model.badge}
                                   </span>
                                 )}
-                                <span className="text-[10px] text-white/20 font-mono">{model.contextWindow}</span>
+                                <span className="text-[10px] text-gray-300 dark:text-white/20 font-mono">{model.contextWindow}</span>
                               </div>
-                              <p className="text-xs text-white/40 leading-relaxed">{model.description}</p>
+                              <p className="text-xs text-gray-400 dark:text-white/40 leading-relaxed">{model.description}</p>
                               <div className="flex gap-3 mt-1.5">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] text-white/30">{t("model.speed", lang)}</span>
+                                  <span className="text-[10px] text-gray-400 dark:text-white/30">{t("model.speed", lang)}</span>
                                   <div className="flex gap-0.5">
                                     {[...Array(5)].map((_, i) => (
                                       <div key={i} className={cn("w-2 h-1 rounded-full", i < model.speed ? "bg-blue-400" : "bg-white/10")} />
@@ -385,7 +386,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] text-white/30">{t("model.intelligence", lang)}</span>
+                                  <span className="text-[10px] text-gray-400 dark:text-white/30">{t("model.intelligence", lang)}</span>
                                   <div className="flex gap-0.5">
                                     {[...Array(5)].map((_, i) => (
                                       <div key={i} className={cn("w-2 h-1 rounded-full", i < model.intelligence ? "bg-violet-400" : "bg-white/10")} />
@@ -431,12 +432,12 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                               <span className={cn("text-sm font-semibold", isSelected ? "text-white" : "text-white/80")}>
                                 {model.name}
                               </span>
-                              <span className="text-[10px] text-white/20 font-mono">{model.contextWindow}</span>
+                              <span className="text-[10px] text-gray-300 dark:text-white/20 font-mono">{model.contextWindow}</span>
                             </div>
                             <p className="text-xs text-white/40 leading-relaxed truncate">{model.description}</p>
                             <div className="flex gap-3 mt-1.5">
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-white/30">{t("model.speed", lang)}</span>
+                                <span className="text-[10px] text-gray-400 dark:text-white/30">{t("model.speed", lang)}</span>
                                 <div className="flex gap-0.5">
                                   {[...Array(5)].map((_, i) => (
                                     <div key={i} className={cn("w-2 h-1 rounded-full", i < model.speed ? "bg-blue-400" : "bg-white/10")} />
@@ -444,7 +445,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                                 </div>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-white/30">{t("model.intelligence", lang)}</span>
+                                <span className="text-[10px] text-gray-400 dark:text-white/30">{t("model.intelligence", lang)}</span>
                                 <div className="flex gap-0.5">
                                   {[...Array(5)].map((_, i) => (
                                     <div key={i} className={cn("w-2 h-1 rounded-full", i < model.intelligence ? "bg-violet-400" : "bg-white/10")} />
@@ -461,7 +462,7 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                 </div>
               )}
             </div>
-            <div className="px-3 pb-3 pt-1 border-t border-white/6 space-y-1.5">
+            <div className="px-3 pb-3 pt-1 border-t border-gray-100 dark:border-white/6 space-y-1.5">
               <button
                 onClick={() => { onOpenSettings?.(); setOpen(false); }}
                 className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] text-white/40 hover:text-blue-300 hover:bg-white/5 transition-colors"

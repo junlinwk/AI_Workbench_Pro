@@ -8,8 +8,11 @@
  * To customize the verification email template, go to:
  * Supabase Dashboard -> Authentication -> Email Templates -> Confirm signup
  */
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, Suspense, lazy } from "react"
 import { useAuth } from "@/contexts/AuthContext"
+import LiquidGlass from "liquid-glass-react"
+
+const Hyperspeed = lazy(() => import("@/components/Hyperspeed"))
 
 // ---------------------------------------------------------------------------
 //  Disposable / temporary email domain blocklist
@@ -315,39 +318,21 @@ export default function LoginPage() {
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden"
-      style={{ background: "oklch(0.09 0.012 265)" }}
+      style={{ background: "oklch(0.05 0.012 265)" }}
     >
-      {/* Background gradient effects */}
+      {/* Hyperspeed star-field background */}
+      <Suspense fallback={null}>
+        <Hyperspeed starCount={600} speed={1.5} />
+      </Suspense>
+
+      {/* Subtle gradient overlay */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage: `
-            radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.22 255 / 6%) 0%, transparent 60%),
-            radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.25 290 / 5%) 0%, transparent 60%)
+            radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.22 255 / 4%) 0%, transparent 60%),
+            radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.25 290 / 3%) 0%, transparent 60%)
           `,
-        }}
-      />
-
-      {/* Animated orbs */}
-      <div
-        className="absolute w-[600px] h-[600px] rounded-full pointer-events-none"
-        style={{
-          background:
-            "radial-gradient(circle, oklch(0.5 0.2 255 / 4%) 0%, transparent 70%)",
-          top: "-200px",
-          left: "-100px",
-          animation: "pulse 8s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute w-[400px] h-[400px] rounded-full pointer-events-none"
-        style={{
-          background:
-            "radial-gradient(circle, oklch(0.5 0.2 290 / 3%) 0%, transparent 70%)",
-          bottom: "-150px",
-          right: "-50px",
-          animation:
-            "pulse 10s ease-in-out infinite reverse",
         }}
       />
 
@@ -366,21 +351,9 @@ export default function LoginPage() {
         {lang === "zh-TW" ? "EN" : "\u4e2d\u6587"}
       </button>
 
-      {/* Card */}
-      <div
-        className="relative z-10 w-full max-w-md mx-4 rounded-2xl p-6 sm:p-8"
-        style={{
-          background: "oklch(0.13 0.012 265 / 80%)",
-          backdropFilter: "blur(40px) saturate(1.5)",
-          border: "1px solid oklch(1 0 0 / 8%)",
-          boxShadow: `
-            0 0 0 1px oklch(1 0 0 / 3%),
-            0 20px 60px oklch(0 0 0 / 40%),
-            0 0 80px oklch(0.5 0.2 255 / 5%),
-            inset 0 1px 0 oklch(1 0 0 / 5%)
-          `,
-        }}
-      >
+      {/* Card — Liquid Glass */}
+      <LiquidGlass className="relative z-10 w-full max-w-md mx-4 rounded-3xl p-6 sm:p-8">
+        <div>
         {/* Logo — uses unified /logos/app-logo.png */}
         <div className="flex flex-col items-center mb-6">
           <img
@@ -758,7 +731,8 @@ export default function LoginPage() {
             </button>
           </form>
         )}
-      </div>
+        </div>
+      </LiquidGlass>
 
       {/* Footer */}
       <p

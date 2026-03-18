@@ -39,6 +39,7 @@ import {
   MicOff,
   Volume2,
   X,
+  Hand,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -60,6 +61,8 @@ import {
   browserTranscribe,
   hasSpeechRecognition,
 } from "@/lib/audioClient"
+import { useHandGesture } from "@/hooks/useHandGesture"
+import { HandGestureOverlay } from "./HandGestureOverlay"
 import {
   getVisibleMessages,
   getVisibleMemory,
@@ -1001,11 +1004,24 @@ export default function ChatInterface({
   // Voice state
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
+  const [audioLevel, setAudioLevel] = useState(0) // 0-1 for visualisation
+  const [voiceDragState, setVoiceDragState] = useState<{
+    active: boolean
+    direction: "none" | "left" | "up" | "right"
+    startX: number
+    startY: number
+  }>({ active: false, direction: "none", startX: 0, startY: 0 })
+  const [liveTranscript, setLiveTranscript] = useState("")
+  const [handGestureMode, setHandGestureMode] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animFrameRef = useRef<number>(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const handleSendRef = useRef<(() => void) | null>(null)
 
   // Check for pending background responses on mount (from tab switches)
   useEffect(() => {
@@ -1153,22 +1169,53 @@ export default function ChatInterface({
     textareaRef.current?.focus()
   }, [])
 
-  // ── Voice recording ──
+  // ── Voice recording with audio level monitoring ──
+  const stopAudioMonitor = useCallback(() => {
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+    audioContextRef.current?.close().catch(() => {})
+    audioContextRef.current = null
+    analyserRef.current = null
+    setAudioLevel(0)
+  }, [])
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
+
+      // Audio level monitoring
+      const audioCtx = new AudioContext()
+      const source = audioCtx.createMediaStreamSource(stream)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      audioContextRef.current = audioCtx
+      analyserRef.current = analyser
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const monitorLevel = () => {
+        if (!analyserRef.current) return
+        analyserRef.current.getByteFrequencyData(dataArray)
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+        setAudioLevel(Math.min(avg / 128, 1))
+        animFrameRef.current = requestAnimationFrame(monitorLevel)
+      }
+      monitorLevel()
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4",
+      })
       const chunks: Blob[] = []
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data)
       }
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
-        const blob = new Blob(chunks, { type: "audio/webm" })
+        stopAudioMonitor()
+        const blob = new Blob(chunks, { type: recorder.mimeType })
         setIsRecording(false)
 
         // Transcribe
-        toast.info(lang === "en" ? "Transcribing..." : "轉錄中...", { duration: 2000 })
+        setLiveTranscript(lang === "en" ? "Transcribing..." : "轉錄中...")
         try {
           let text = ""
           if (groqApiKey) {
@@ -1181,8 +1228,10 @@ export default function ChatInterface({
                 ? "No Groq API key set for voice. Add one in Settings."
                 : "尚未設定 Groq API Key，請在設定中新增。",
             )
+            setLiveTranscript("")
             return
           }
+          setLiveTranscript(text || "")
           if (text) {
             setInput((prev) => (prev ? prev + " " + text : text))
             textareaRef.current?.focus()
@@ -1190,11 +1239,13 @@ export default function ChatInterface({
         } catch {
           toast.error(lang === "en" ? "Transcription failed" : "語音轉錄失敗")
         }
+        setTimeout(() => setLiveTranscript(""), 3000)
       }
 
       recorder.start()
       mediaRecorderRef.current = recorder
       setIsRecording(true)
+      setLiveTranscript(lang === "en" ? "Listening..." : "聆聽中...")
     } catch {
       toast.error(
         lang === "en"
@@ -1202,13 +1253,60 @@ export default function ChatInterface({
           : "麥克風存取被拒絕",
       )
     }
-  }, [groqApiKey, lang])
+  }, [groqApiKey, lang, stopAudioMonitor])
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.stop()
     }
-  }, [])
+    stopAudioMonitor()
+  }, [stopAudioMonitor])
+
+  // Voice mode drag gesture handler
+  const handleVoiceDragStart = useCallback((clientX: number, clientY: number) => {
+    setVoiceDragState({ active: true, direction: "none", startX: clientX, startY: clientY })
+    startRecording()
+  }, [startRecording])
+
+  const handleVoiceDragMove = useCallback((clientX: number, clientY: number) => {
+    if (!voiceDragState.active) return
+    const dx = clientX - voiceDragState.startX
+    const dy = voiceDragState.startY - clientY // positive = up
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist < 20) {
+      setVoiceDragState(prev => ({ ...prev, direction: "none" }))
+      return
+    }
+    // Calculate angle: 0° = right, 90° = up, 180° = left
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+    let dir: "left" | "up" | "right" = "up"
+    if (angle >= 40 && angle <= 140) dir = "up" // send
+    else if (angle > 140 || angle < -140) dir = "left" // edit
+    else dir = "right" // close
+    setVoiceDragState(prev => ({ ...prev, direction: dir }))
+  }, [voiceDragState.active, voiceDragState.startX, voiceDragState.startY])
+
+  const handleVoiceDragEnd = useCallback(() => {
+    stopRecording()
+    const dir = voiceDragState.direction
+    setVoiceDragState({ active: false, direction: "none", startX: 0, startY: 0 })
+
+    // Process action after transcript is ready
+    setTimeout(() => {
+      if (dir === "up") {
+        // Auto-send
+        handleSendRef.current?.()
+      } else if (dir === "left") {
+        // Edit: keep text in input, focus
+        textareaRef.current?.focus()
+      } else if (dir === "right") {
+        // Close: clear transcript and voice mode
+        setInput("")
+        setLiveTranscript("")
+        setVoiceMode(false)
+      }
+    }, 1500) // Wait for transcription
+  }, [voiceDragState.direction, stopRecording])
 
   // ── Image upload handler ──
   const handleImageUpload = useCallback((file: File) => {
@@ -1640,6 +1738,40 @@ export default function ChatInterface({
     }
   }
 
+  // Keep ref to handleSend for voice mode drag-to-send
+  handleSendRef.current = handleSend
+
+  // Hand gesture recognition hook
+  const {
+    gestureState,
+    videoRef: gestureVideoRef,
+    isModelLoading: gestureModelLoading,
+    modelLoadError: gestureModelError,
+    handLandmarks: _handLandmarks,
+    cameraActive: gestureCameraActive,
+  } = useHandGesture({
+    enabled: handGestureMode,
+    onGrabStart: startRecording,
+    onPushSend: () => {
+      stopRecording()
+      setTimeout(() => handleSendRef.current?.(), 1500)
+    },
+    onThrowDiscard: () => {
+      stopRecording()
+      setInput("")
+      setLiveTranscript("")
+    },
+    onRelease: stopRecording,
+  })
+
+  // Auto-disable on model load error
+  useEffect(() => {
+    if (gestureModelError && handGestureMode) {
+      toast.error(gestureModelError)
+      setHandGestureMode(false)
+    }
+  }, [gestureModelError, handGestureMode])
+
   const handleStop = () => {
     abortRef.current?.abort()
     setIsTyping(false)
@@ -2013,10 +2145,112 @@ export default function ChatInterface({
           </div>
         )}
 
+        {/* Hand gesture mode: camera preview + gesture overlay */}
+        {handGestureMode && (
+          <div className="rounded-2xl border border-violet-500/30 bg-violet-900/10 backdrop-blur-sm shadow-lg shadow-violet-900/20 p-4 flex flex-col items-center gap-3 select-none">
+            {liveTranscript && (
+              <div className="px-4 py-2 rounded-xl bg-black/40 text-white/80 text-sm max-w-full truncate">
+                {liveTranscript}
+              </div>
+            )}
+            <HandGestureOverlay
+              videoRef={gestureVideoRef}
+              gestureState={gestureState}
+              isModelLoading={gestureModelLoading}
+              modelLoadError={gestureModelError}
+              audioLevel={audioLevel}
+              cameraActive={gestureCameraActive}
+              lang={lang}
+            />
+          </div>
+        )}
+
+        {/* Voice mode: press-and-hold overlay */}
+        {voiceMode && !handGestureMode && (
+          <div className="rounded-2xl border border-violet-500/30 bg-violet-900/10 backdrop-blur-sm shadow-lg shadow-violet-900/20 p-4 flex flex-col items-center gap-3 select-none">
+            {/* Live transcript floating above */}
+            {liveTranscript && (
+              <div className="px-4 py-2 rounded-xl bg-black/40 text-white/80 text-sm max-w-full truncate">
+                {liveTranscript}
+              </div>
+            )}
+
+            {/* Drag direction hints */}
+            <div className="flex items-center gap-6 text-[10px] text-white/30">
+              <span className={cn(voiceDragState.direction === "left" && "text-blue-400 font-bold")}>
+                ← {lang === "en" ? "Edit" : "編輯"}
+              </span>
+              <span className={cn(voiceDragState.direction === "up" && "text-emerald-400 font-bold")}>
+                ↑ {lang === "en" ? "Send" : "發送"}
+              </span>
+              <span className={cn(voiceDragState.direction === "right" && "text-red-400 font-bold")}>
+                {lang === "en" ? "Close" : "關閉"} →
+              </span>
+            </div>
+
+            {/* Press-and-hold button */}
+            <div
+              className="relative"
+              onPointerDown={(e) => {
+                e.preventDefault()
+                ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+                handleVoiceDragStart(e.clientX, e.clientY)
+              }}
+              onPointerMove={(e) => handleVoiceDragMove(e.clientX, e.clientY)}
+              onPointerUp={() => handleVoiceDragEnd()}
+              onPointerCancel={() => handleVoiceDragEnd()}
+            >
+              {/* Audio level ring */}
+              <div
+                className="absolute inset-0 rounded-full border-2 border-violet-400/40 pointer-events-none"
+                style={{
+                  transform: `scale(${1 + audioLevel * 0.8})`,
+                  opacity: 0.3 + audioLevel * 0.7,
+                  transition: "transform 0.08s, opacity 0.08s",
+                }}
+              />
+              <div
+                className="absolute inset-0 rounded-full border border-violet-300/20 pointer-events-none"
+                style={{
+                  transform: `scale(${1 + audioLevel * 1.3})`,
+                  opacity: audioLevel * 0.4,
+                  transition: "transform 0.1s, opacity 0.1s",
+                }}
+              />
+              <button
+                className={cn(
+                  "relative z-10 w-16 h-16 rounded-full flex items-center justify-center transition-all",
+                  voiceDragState.active
+                    ? "bg-violet-500/40 scale-110"
+                    : "bg-violet-500/20 hover:bg-violet-500/30",
+                  voiceDragState.direction === "up" && "bg-emerald-500/30",
+                  voiceDragState.direction === "left" && "bg-blue-500/30",
+                  voiceDragState.direction === "right" && "bg-red-500/30",
+                )}
+              >
+                <Volume2 size={24} className={cn(
+                  "text-violet-300",
+                  voiceDragState.direction === "up" && "text-emerald-300",
+                  voiceDragState.direction === "left" && "text-blue-300",
+                  voiceDragState.direction === "right" && "text-red-300",
+                )} />
+              </button>
+            </div>
+
+            <p className="text-[10px] text-white/25">
+              {lang === "en" ? "Hold and drag to act" : "按住拖動操作"}
+            </p>
+          </div>
+        )}
+
+        {/* Normal input area — hidden in voice mode */}
         <div
-          className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm overflow-hidden
-          focus-within:border-blue-500/40 focus-within:bg-white/7 transition-all duration-200
-          shadow-lg shadow-black/20"
+          className={cn(
+            "relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm",
+            "focus-within:border-blue-500/40 focus-within:bg-white/7 transition-all duration-200",
+            "shadow-lg shadow-black/20",
+            (voiceMode || handGestureMode) && "hidden",
+          )}
         >
           {/* Attachment Menu */}
           {showAttachMenu && (
@@ -2191,40 +2425,52 @@ export default function ChatInterface({
               <Code2 size={16} />
             </button>
 
-            {/* Mic button */}
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={cn(
-                "p-2 rounded-xl transition-all duration-150 shrink-0",
-                isRecording
-                  ? "bg-red-500/20 text-red-400 animate-pulse"
-                  : "text-white/30 hover:text-white/60 hover:bg-white/8",
+            {/* Mic button with audio level ring */}
+            <div className="relative shrink-0">
+              {isRecording && (
+                <div
+                  className="absolute inset-0 rounded-xl border-2 border-blue-400/60 pointer-events-none"
+                  style={{
+                    transform: `scale(${1 + audioLevel * 0.5})`,
+                    opacity: 0.4 + audioLevel * 0.6,
+                    transition: "transform 0.1s, opacity 0.1s",
+                  }}
+                />
               )}
-              title={
-                isRecording
-                  ? (lang === "en" ? "Stop recording" : "停止錄音")
-                  : (lang === "en" ? "Voice input" : "語音輸入")
-              }
-            >
-              {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
-            </button>
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                className={cn(
+                  "p-2 rounded-xl transition-all duration-150 relative z-10",
+                  isRecording
+                    ? "bg-blue-500/20 text-blue-400"
+                    : "text-white/30 hover:text-white/60 hover:bg-white/8",
+                )}
+                title={
+                  isRecording
+                    ? (lang === "en" ? "Stop recording" : "停止錄音")
+                    : (lang === "en" ? "Voice input" : "語音輸入")
+                }
+              >
+                <Mic size={16} />
+              </button>
+            </div>
 
             {/* Voice conversation mode toggle */}
             <button
               onClick={() => {
-                const next = !voiceMode
-                setVoiceMode(next)
-                if (next) {
+                setVoiceMode(prev => !prev)
+                if (!voiceMode) {
+                  setHandGestureMode(false) // mutual exclusion
                   toast.info(
                     lang === "en"
-                      ? "Voice mode ON — speak → AI responds → reads aloud → listens again"
-                      : "語音對話模式 ON — 說話 → AI 回覆 → 朗讀 → 繼續聆聽",
+                      ? "Voice mode ON — press and hold the button to speak"
+                      : "語音對話模式 ON — 按住按鈕說話",
                     { duration: 3000 },
                   )
-                  startRecording()
                 } else {
                   stopRecording()
                   window.speechSynthesis?.cancel()
+                  setLiveTranscript("")
                 }
               }}
               className={cn(
@@ -2236,6 +2482,35 @@ export default function ChatInterface({
               title={lang === "en" ? "Voice conversation mode" : "語音對話模式"}
             >
               <Volume2 size={16} />
+            </button>
+
+            {/* Hand gesture mode toggle */}
+            <button
+              onClick={() => {
+                setHandGestureMode(prev => !prev)
+                if (!handGestureMode) {
+                  setVoiceMode(false) // mutual exclusion
+                  stopRecording()
+                  toast.info(
+                    lang === "en"
+                      ? "Gesture mode ON — show palm, then make fist to record"
+                      : "手勢模式 ON — 伸出手掌，握拳開始錄音",
+                    { duration: 3000 },
+                  )
+                } else {
+                  stopRecording()
+                  setLiveTranscript("")
+                }
+              }}
+              className={cn(
+                "p-2 rounded-xl transition-all duration-150 shrink-0",
+                handGestureMode
+                  ? "bg-amber-500/20 text-amber-400"
+                  : "text-white/30 hover:text-white/60 hover:bg-white/8",
+              )}
+              title={lang === "en" ? "Hand gesture mode" : "手勢控制模式"}
+            >
+              <Hand size={16} />
             </button>
 
             {isTyping ? (
