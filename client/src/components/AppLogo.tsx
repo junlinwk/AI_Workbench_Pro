@@ -1,12 +1,9 @@
 /**
  * AppLogo — Unified branding component
  *
- * Usage:
- *   <AppLogo size={48} />              — renders the app logo
- *   <AppLogo size={48} showText />     — logo + "AI Workbench" text
- *
- * To customize: replace /logos/app-logo.svg with your own SVG.
- * The AI chat bubble avatar also uses this for consistency.
+ * Logo files (in /client/public/logos/):
+ *   app-logo.png       — App icon (favicon, AI avatar, login, memory map)
+ *   ai-workbench.png   — Brand wordmark (sidebar header)
  */
 
 interface AppLogoProps {
@@ -19,12 +16,12 @@ export default function AppLogo({ size = 40, showText, className }: AppLogoProps
   return (
     <div className={`flex items-center gap-2 ${className ?? ""}`}>
       <img
-        src="/logos/app-logo.svg"
+        src="/logos/app-logo.png"
         alt="AI Workbench"
         width={size}
         height={size}
         className="rounded-xl"
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, objectFit: "cover" }}
       />
       {showText && (
         <span className="text-sm font-bold text-white/90 tracking-tight">
@@ -36,18 +33,17 @@ export default function AppLogo({ size = 40, showText, className }: AppLogoProps
 }
 
 /**
- * AI avatar for chat bubbles — uses the app logo for brand consistency.
- * Falls back to the gradient + sparkle icon if logo not available.
+ * AI avatar for chat bubbles
  */
 export function AIAvatar({ size = 32 }: { size?: number }) {
   return (
     <img
-      src="/logos/app-logo.svg"
+      src="/logos/app-logo.png"
       alt="AI"
       width={size}
       height={size}
       className="rounded-full"
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, objectFit: "cover" }}
     />
   )
 }

@@ -337,6 +337,29 @@ async function pullSettingsFromCloud(userId: string): Promise<Settings | null> {
   }
 }
 
+/** Pull membership tier from profiles table (admin writes here) */
+async function pullMembershipTier(userId: string): Promise<MembershipTier | null> {
+  const supabase = getSupabase()
+  if (!supabase || !isSupabaseConfigured()) return null
+
+  try {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("membership_tier")
+      .eq("id", userId)
+      .single()
+
+    if (error || !data?.membership_tier) return null
+    const tier = data.membership_tier as string
+    if (["classic", "pro", "ultra"].includes(tier)) {
+      return tier as MembershipTier
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function getResolvedTheme(mode: ThemeMode): "dark" | "light" {
   if (mode === "system") {
     return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -403,18 +426,63 @@ export function SettingsProvider({
       pullSettingsFromCloud(userId).then((cloud) => {
         if (!cloud) return
         setSettings((prev) => {
-          // If local has no API keys but cloud does, use cloud keys
           const localHasKeys = Object.keys(prev.apiKeys).length > 0
           const cloudHasKeys = Object.keys(cloud.apiKeys).length > 0
           if (!localHasKeys && cloudHasKeys) {
             return { ...prev, apiKeys: cloud.apiKeys }
           }
-          // If local has keys, keep local (user's latest changes)
           return prev
         })
       })
+
+      // Also pull membership tier from profiles table (admin may have changed it)
+      pullMembershipTier(userId).then((tier) => {
+        if (tier) {
+          setSettings((prev) => {
+            if (prev.membershipTier !== tier) {
+              return { ...prev, membershipTier: tier }
+            }
+            return prev
+          })
+        }
+      })
     }
   }, [userId])
+
+  // Periodic membership tier check (picks up admin changes without refresh)
+  useEffect(() => {
+    if (!userId) return
+    const interval = setInterval(() => {
+      pullMembershipTier(userId).then((tier) => {
+        if (tier) {
+          setSettings((prev) =>
+            prev.membershipTier !== tier ? { ...prev, membershipTier: tier } : prev
+          )
+        }
+      })
+    }, 30_000) // Check every 30 seconds
+    return () => clearInterval(interval)
+  }, [userId])
+
+  // Listen for remote settings changes (from other devices via Realtime)
+  useEffect(() => {
+    function handleRemoteUpdate(e: Event) {
+      const { namespace, data } = (e as CustomEvent).detail || {}
+      if (namespace !== SETTINGS_NAMESPACE || !data) return
+      const remote = data as Settings
+      const apiKeys =
+        remote.apiKeys && typeof remote.apiKeys === "object"
+          ? deobfuscateKeys(remote.apiKeys)
+          : {}
+      setSettings((prev) => ({
+        ...prev,
+        ...remote,
+        apiKeys: Object.keys(apiKeys).length > 0 ? apiKeys : prev.apiKeys,
+      }))
+    }
+    window.addEventListener("storage-remote-update", handleRemoteUpdate)
+    return () => window.removeEventListener("storage-remote-update", handleRemoteUpdate)
+  }, [])
 
   // Persist
   useEffect(() => {

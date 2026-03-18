@@ -1578,9 +1578,16 @@ export default function TaskDAG() {
         return
       }
 
-      // Set running
+      // Set running — only activate edges whose source actually deposited into this node's mailbox
+      const currentMailbox = mailbox.get(nodeId) || new Map()
+      const activeSenders = new Set(currentMailbox.keys())
       setNodes((p) => p.map((n) => n.id === nodeId ? { ...n, status: "running" as NodeStatus, visitCount: visits } : n))
-      setEdges((p) => p.map((e) => e.to === nodeId ? { ...e, status: "active" as const } : e))
+      setEdges((p) => p.map((e) => {
+        if (e.to === nodeId && activeSenders.has(e.from)) {
+          return { ...e, status: "active" as const }
+        }
+        return e
+      }))
 
       // ── Collect ALL predecessor outputs from mailbox, keyed by "#index label" ──
       const predecessorOutputs = new Map<string, string>()
@@ -1628,7 +1635,13 @@ export default function TaskDAG() {
         }
 
         setNodes((p) => p.map((n) => n.id === nodeId ? { ...n, status: "completed" as NodeStatus, output: parsed.raw } : n))
-        setEdges((p) => p.map((e) => e.to === nodeId ? { ...e, status: "completed" as const } : e))
+        // Only mark edges as completed if they were actually used (active)
+        setEdges((p) => p.map((e) => {
+          if (e.to === nodeId && activeSenders.has(e.from)) {
+            return { ...e, status: "completed" as const }
+          }
+          return e
+        }))
 
         // Determine next edges
         const outEdges = allEdgesSnapshot.filter((e) => e.from === nodeId)
@@ -1662,10 +1675,8 @@ export default function TaskDAG() {
           nextEdges = outEdges
         }
 
-        // Signal completion to downstream
-        onNodeComplete(nodeId)
-
-        // Also deposit into downstream mailboxes for next edges
+        // Deposit into downstream mailboxes for the chosen edges only
+        // (onNodeComplete is only for fallthrough cases like max-iteration/error)
         for (const edge of nextEdges) {
           deposit(edge.to, nodeId, parsed.result, edge.prompt || undefined)
         }

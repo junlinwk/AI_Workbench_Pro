@@ -35,7 +35,7 @@ function cacheKey(userId: string, namespace: string): string {
 // ---------------------------------------------------------------------------
 
 const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>()
-const SYNC_DEBOUNCE_MS = 800 // Wait 0.8s after last write before queuing
+const SYNC_DEBOUNCE_MS = 500 // Wait 0.5s after last write before queuing
 
 function debouncedSyncEnqueue(
   userId: string,
@@ -61,7 +61,7 @@ function debouncedSyncEnqueue(
         data,
         createdAt: new Date().toISOString(),
         retries: 0,
-      }).catch(() => {})
+      }).catch(() => { })
     }, SYNC_DEBOUNCE_MS),
   )
 }
@@ -93,7 +93,7 @@ export function loadUserData<T>(
       cache.set(key, parsed)
       return parsed
     }
-  } catch {}
+  } catch { }
 
   return fallback
 }
@@ -112,13 +112,13 @@ export function saveUserData<T>(
   cache.set(key, data)
 
   // Async persist — fire and forget
-  persistToIDB(userId, namespace, data).catch(() => {})
+  persistToIDB(userId, namespace, data).catch(() => { })
 
   // Also write to localStorage as a fallback
   try {
     const lsKey = `ai-wb-${namespace}-${userId}`
     localStorage.setItem(lsKey, JSON.stringify(data))
-  } catch {}
+  } catch { }
 }
 
 /**
@@ -140,16 +140,16 @@ export function removeUserData(
   }
 
   // Async cleanup from IDB
-  idbDelete(userId, namespace).catch(() => {})
+  idbDelete(userId, namespace).catch(() => { })
 
   // Cleanup from localStorage
   try {
     const lsKey = `ai-wb-${namespace}-${userId}`
     localStorage.removeItem(lsKey)
-  } catch {}
+  } catch { }
 
   // Delete from Supabase
-  deleteFromCloud(userId, namespace).catch(() => {})
+  deleteFromCloud(userId, namespace).catch(() => { })
 }
 
 // ---------------------------------------------------------------------------
@@ -196,9 +196,9 @@ export function listUserDataByPattern(
           const parsed = JSON.parse(raw)
           results.push({ namespace: ns, data: parsed })
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 
   return results
 }
@@ -235,7 +235,7 @@ export async function clearAllUserData(userId: string): Promise<void> {
   try {
     const { idbClearUser } = await import("./idb")
     await idbClearUser(userId)
-  } catch {}
+  } catch { }
 
   // Clear from localStorage
   try {
@@ -250,10 +250,10 @@ export async function clearAllUserData(userId: string): Promise<void> {
     for (const key of keysToRemove) {
       localStorage.removeItem(key)
     }
-  } catch {}
+  } catch { }
 
   // Delete all user data from Supabase
-  deleteAllFromCloud(userId).catch(() => {})
+  deleteAllFromCloud(userId).catch(() => { })
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@ export async function resetStorage(): Promise<void> {
   try {
     const { stopSyncEngine } = await import("./supabase-sync")
     stopSyncEngine()
-  } catch {}
+  } catch { }
 
   // Cancel all pending syncs
   for (const [, timer] of pendingSyncs) {
@@ -324,9 +324,9 @@ async function hydrateCache(userId: string): Promise<void> {
       try {
         const parsed = JSON.parse(row.data)
         cache.set(cacheKey(userId, row.namespace), parsed)
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 
   // Also hydrate from localStorage for any keys not in IndexedDB
   try {
@@ -348,9 +348,9 @@ async function hydrateCache(userId: string): Promise<void> {
         if (raw) {
           cache.set(ck, JSON.parse(raw))
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 }
 
 async function persistToIDB<T>(

@@ -197,7 +197,7 @@ function MessageBubble({
               <User size={14} className="text-white" />
             )
           ) : (
-            <img src="/logos/app-logo.svg" alt="AI" className="w-8 h-8 rounded-full" />
+            <img src="/logos/app-logo.png" alt="AI" className="w-8 h-8 rounded-full" />
           )}
         </div>
       )}
@@ -247,7 +247,7 @@ function MessageBubble({
             prose-li:text-white/75
           "
           >
-            <Streamdown>{message.content}</Streamdown>
+            <Streamdown>{message.content.replace(/```(?:markdown|md)\n([\s\S]*?)```/g, "$1")}</Streamdown>
           </div>
         </div>
 
@@ -833,6 +833,22 @@ function needsWebSearch(msg: string): "yes" | "no" | "maybe" {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Global pending AI responses (survives tab switches / unmounts)      */
+/* ------------------------------------------------------------------ */
+
+interface PendingResponse {
+  convId: string
+  promise: Promise<string>
+  abort: AbortController
+  userId: string
+  modelId: string
+  branchId: string
+  userMsg: Message
+}
+
+const pendingResponses = new Map<string, PendingResponse>()
+
+/* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -924,6 +940,36 @@ export default function ChatInterface({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Check for pending background responses on mount (from tab switches)
+  useEffect(() => {
+    const pending = pendingResponses.get(effectiveConvId)
+    if (!pending) return
+
+    setIsTyping(true)
+    pending.promise
+      .then((response) => {
+        setIsTyping(false)
+        const aiMsg: Message = {
+          id: `m${Date.now() + 1}`,
+          role: "assistant",
+          content: response,
+          timestamp: new Date().toLocaleTimeString("zh-TW", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          model: pending.modelId,
+          branchId: pending.branchId,
+        }
+        setAllMessages((prev) => [...prev, aiMsg])
+        extractAndDispatchCodeBlocks(response)
+        pendingResponses.delete(effectiveConvId)
+      })
+      .catch(() => {
+        setIsTyping(false)
+        pendingResponses.delete(effectiveConvId)
+      })
+  }, [effectiveConvId])
 
   // Persist unified messages on change (debounced)
   useEffect(() => {
@@ -1289,7 +1335,7 @@ export default function ChatInterface({
     const folderContext = folderPrompt ? `\n\n--- Folder Context ---\n${folderPrompt}` : ""
     const fullSystemPrompt = systemBase + userProfileContext + pinnedContext + memoryContext + folderContext + webAndUrlContext
 
-    // Real API call
+    // Real API call — registered as global pending so it survives tab switches
     try {
       const abort = new AbortController()
       abortRef.current = abort
@@ -1300,7 +1346,7 @@ export default function ChatInterface({
       }))
       chatHistory.push({ role: "user", content: userMsg.content })
 
-      const response = await callAI(
+      const aiPromise = callAI(
         chatHistory,
         settings.selectedModelId,
         apiKey,
@@ -1309,6 +1355,20 @@ export default function ChatInterface({
         fullSystemPrompt,
         abort.signal,
       )
+
+      // Register globally so response survives tab switches
+      pendingResponses.set(effectiveConvId, {
+        convId: effectiveConvId,
+        promise: aiPromise,
+        abort,
+        userId: effectiveUserId,
+        modelId: settings.selectedModelId,
+        branchId: activeBranchId,
+        userMsg,
+      })
+
+      const response = await aiPromise
+      pendingResponses.delete(effectiveConvId)
 
       setIsTyping(false)
       const aiMsg: Message = {

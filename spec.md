@@ -162,9 +162,9 @@ In-Memory Cache  ──→  IndexedDB  ──→  Supabase (cloud sync)
 **Write flow:**
 ```
 saveUserData() → cache.set() → persistToIDB() → debouncedSyncEnqueue()
-                                                       ↓ (1.5s debounce)
+                                                       ↓ (500ms debounce)
                                                  syncQueue.add()
-                                                       ↓ (10s periodic drain)
+                                                       ↓ (3-5s periodic drain, isDraining mutex)
                                                  supabase.upsert()
 ```
 
@@ -182,18 +182,21 @@ initStorage(userId)
 **Delete flow:**
 ```
 removeUserData() → cache.delete() → idbDelete() → supabase.delete()
-clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all)
+clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all user rows)
 ```
 
-**Debouncing:** Rapid writes to the same namespace are coalesced via a 1.5s debounce timer. Only the latest version is enqueued, preventing sync queue flooding during typing or slider dragging.
+**Startup flow — `initialPull` detail:**
+- After pulling all cloud data to local IDB + cache, `initialPull` clears any stale entries in the sync queue to prevent re-pushing outdated data.
 
-**Periodic drain:** Every 10 seconds, the sync engine drains the queue and pushes all pending writes to Supabase. Settings changes also trigger an immediate drain via `triggerSync()`.
+**Debouncing:** Rapid writes to the same namespace are coalesced via a 500ms debounce timer. Only the latest version is enqueued, preventing sync queue flooding during typing or slider dragging.
+
+**Periodic drain:** Every 3-5 seconds, the sync engine drains the queue and pushes all pending writes to Supabase. An `isDraining` mutex prevents concurrent drain calls from racing. Settings and API key changes also trigger an immediate drain via `triggerSync()`. The drain reads latest data from IDB (not stale queue entries) and deduplicates per namespace before pushing.
 
 **Conflict resolution strategies (per namespace):**
 
 | Namespace pattern | Strategy | Behavior |
 |-------------------|----------|----------|
-| `settings` | `field-merge` | Merge individual fields, prefer newer |
+| `settings` | `field-merge` | Merge individual fields, prefer newer (namespace key is `"settings"`, not `"__settings__"`) |
 | `conv-messages:*` | `union-merge` | Union of all messages (no duplicates) |
 | `conv-memory:*` | `union-merge` | Union of memory entries |
 | `notepad` | `last-write-wins` | Latest version wins entirely |
@@ -212,6 +215,13 @@ clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all)
 - Filtered by `user_id=eq.{userId}` — only receives own data changes
 - Remote changes are merged into local cache via `resolveConflict()`
 - Updates are reflected in the UI on next read from cache
+- On CHANNEL_ERROR, auto-retry subscription after 3 seconds
+
+**Real-time API key sync across devices:**
+- API key changes in SettingsContext call `triggerSync()` for immediate push to Supabase
+- Other devices receive the update via Supabase Realtime `storage-remote-update` CustomEvent
+- SettingsContext listens for `storage-remote-update` and auto-merges remote API keys into local state
+- Encryption uses userId-derived key (`ai-wb-enc-{userId}-v3`), making it cross-device portable (prefix `enc3:`)
 
 **What syncs to Supabase:**
 
@@ -273,7 +283,7 @@ The core chat interface (`ChatInterface.tsx`) supports real-time AI conversation
 - **Code block detection** — fenced code blocks automatically dispatched to Artifacts panel via `artifact-update` CustomEvent
 - **Web search integration** — toggle in header; uses DuckDuckGo + Wikipedia via server proxy
 - **URL content extraction** — detects URLs in user messages, fetches readable text server-side
-- **Auto-naming conversations** — AI generates a summary title after the first exchange
+- **Auto-naming conversations** — AI generates a summary title from the first user message
 - **Citation rendering** — web search results shown as numbered references with domain badges
 - **Message actions** — copy, regenerate, pin to context, create branch, thumbs up/down
 - **Per-conversation persistence** — messages stored per-user per-conversation in IndexedDB/Supabase
@@ -290,7 +300,9 @@ The shared `callAI()` function (`client/src/lib/aiClient.ts`) handles provider-s
 - OpenAI, DeepSeek, xAI, Meta (Groq), Mistral, OpenRouter use OpenAI-compatible chat completions format
 - Anthropic uses its native Messages API with `anthropic-dangerous-direct-browser-access` header
 - Google uses the Gemini `generateContent` endpoint with role mapping (`assistant` -> `model`)
-- All calls route through `/api/ai/chat` server proxy (for CORS and security) when on localhost or HTTPS
+- **OpenRouter** always routes through `/api/ai/chat` server proxy (CORS blocked from browser)
+- **All other providers** call their APIs directly from the browser (faster, no timeout limit)
+- **Fallback**: if any direct call fails with a CORS error, the client auto-retries via the proxy
 
 ### 3.2 Artifacts Panel
 
@@ -541,11 +553,11 @@ Full-featured settings dialog (`SettingsDialog.tsx`) with 8 tabs:
 | Tab | Settings |
 |-----|----------|
 | **General** | Language (zh-TW / en), send key preference (Enter / Ctrl+Enter) |
-| **Appearance** | Theme (dark / light / system), font size (slider 10-35px with live preview modal), message density (compact / comfortable / spacious), avatars toggle, animations toggle |
+| **Appearance** | Theme (dark / light / system), font size (slider 10-35px with fixed-size popup and live preview "Aa / 測試"), message density (compact / comfortable / spacious), avatar display (both / user / ai / none), animations toggle |
 | **Chat** | Streaming toggle, timestamps, markdown rendering, max tokens (1-128000), temperature (0-2), custom system prompt |
 | **Profile** | Display name, role, bio, custom instructions |
 | **Membership** | View current tier (Classic / Pro / Ultra), tier benefits |
-| **Models & API Keys** | Per-provider API key management with visibility toggle, custom model registration (name, provider, endpoint, context window) |
+| **Models & API Keys** | Per-provider API key management with visibility toggle, custom model registration (name, provider dropdown, endpoint, context window) |
 | **Privacy** | Save history toggle, share analytics toggle, clear all data |
 | **About** | Version info, links |
 
@@ -584,6 +596,122 @@ Tab-based feature switching (`FeatureNav.tsx`) between workspace modes:
 
 Core tabs use blue accent; advanced tabs use violet accent. A visual separator divides the groups.
 
+### 3.15 Chat/Folder Lock System
+
+Password-based protection for conversations and folders, implemented in `Sidebar.tsx`.
+
+| Feature | Description |
+|---------|-------------|
+| **SHA-256 hashed passwords** | Passwords hashed via Web Crypto `crypto.subtle.digest('SHA-256', ...)` before storage |
+| **Lock icon** | Appears on hover to the left of the three-dots menu; always visible when the item is locked |
+| **Session-based unlock** | Unlocked items stored in a `Set<string>` in component state; re-locks on page refresh |
+| **Context menu integration** | Right-click menu shows "Lock" (if unlocked) or "Remove Lock" (if locked) |
+| **Cloud sync** | Lock hash stored as `lockHash` property on conversation/folder metadata, synced to Supabase |
+| **Admin bypass** | Admin user (`isAdmin` from AuthContext) bypasses all lock checks |
+| **Password never stored** | Only the SHA-256 hash is persisted; the plaintext password is discarded after hashing |
+| **Locked chat display** | Title replaced with "🔒 Locked" (italic, dimmed); content inaccessible |
+| **Locked folder isolation** | Children (chats + sub-folders) completely hidden, folder cannot expand |
+| **Delete protection** | `handleDeleteChat` and `handleDeleteFolder` check `lockHash` — blocked with toast if locked |
+| **Drag-to-locked confirmation** | `moveChatToFolder` checks target folder's `lockHash`; shows confirmation dialog |
+| **Don't-ask-again** | `lockDropSkipFolders: Set<string>` — per-folder session opt-out, resets on refresh |
+
+**Data flow:**
+```
+User sets password → SHA-256 hash → stored in conversation/folder metadata → synced to Supabase
+User clicks locked item → prompt for password → SHA-256 hash → compare with stored hash → add to unlockedSet
+User drags chat to locked folder → confirmation dialog → "don't ask again" checkbox → moveChatToFolder(skipLockCheck=true)
+```
+
+**Lock enforcement points:**
+| Action | Check location | Behavior when locked |
+|--------|---------------|---------------------|
+| Click chat | `handleChatClick` | Opens lock dialog instead of conversation |
+| Expand folder | `toggleFolder` | Opens lock dialog instead of expanding |
+| View children | `FolderNode` render | Children hidden via conditional render |
+| Delete chat | `handleDeleteChat` | Blocked with toast error |
+| Delete folder | `handleDeleteFolder` | Blocked with toast error |
+| Drag into folder | `moveChatToFolder` | Confirmation dialog (skippable per folder) |
+| Context menu | Right-click menu | Shows "Lock" or "Remove Lock" |
+
+### 3.16 Background AI Response
+
+AI responses continue generating even when the user navigates away from the Chat tab (`ChatInterface.tsx`).
+
+| Feature | Description |
+|---------|-------------|
+| **Global `pendingResponses` Map** | Defined outside the component; survives React unmount/remount cycles |
+| **Transparent re-mount** | On re-mount, `ChatInterface` checks `pendingResponses` for the current conversation and picks up completed responses |
+| **No auto-abort** | Component unmount does NOT abort the `AbortController` — only the manual "Stop" button does |
+| **Map key** | `conversationId` is the key; each conversation can have at most one pending response |
+
+### 3.17 Unified Branding System
+
+Centralized branding assets in `client/public/logos/`.
+
+| Asset | File | Usage |
+|-------|------|-------|
+| **App icon** | `app-logo.png` | Favicon, AI chat bubble avatar, login page logo, memory map center node |
+| **Brand wordmark** | `ai-workbench.png` | Sidebar header (with CSS `mask-image` for soft gradient edges) |
+| **App logo component** | `client/src/components/AppLogo.tsx` | Reusable React component for the app icon |
+
+The AI chat bubble uses the app logo instead of a generic sparkle icon. The user chat bubble shows the Google profile photo (from `user.avatar` in AuthContext).
+
+### 3.18 Avatar Display Settings
+
+Granular avatar visibility control in Settings > Appearance.
+
+| `avatarDisplay` value | User avatar | AI avatar |
+|----------------------|-------------|-----------|
+| `"both"` | Shown | Shown |
+| `"user"` | Shown | Hidden |
+| `"ai"` | Hidden | Shown |
+| `"none"` | Hidden | Hidden |
+
+Replaces the previous simple `showAvatars` boolean toggle. The user avatar shows the Google profile photo when available.
+
+### 3.19 Font Size Slider
+
+In Settings > Appearance, clicking [Edit] next to font size opens a fixed-size popup (360x200px).
+
+| Feature | Description |
+|---------|-------------|
+| **Range** | 10-35px |
+| **Live preview** | Preview text "Aa / 測試" scales in real time |
+| **Fixed popup size** | The popup itself does not scale — only the preview text does |
+| **Root font size** | Sets `font-size` on `<html>` element |
+| **Sidebar scaling** | Sidebar text uses `rem` units, so it scales with the root font size |
+
+### 3.20 OpenRouter CORS Fix
+
+OpenRouter blocks direct browser requests (CORS). The solution uses a selective proxy strategy.
+
+| Provider | Routing | Reason |
+|----------|---------|--------|
+| **OpenRouter** | Always via `/api/ai/chat` proxy | CORS blocked from browser |
+| **All other providers** | Direct API call from browser | Faster, no timeout limit |
+| **Fallback** | If any direct call fails with CORS error, auto-retry via proxy | Resilience |
+
+Custom OpenRouter models registered via Settings also route through the proxy.
+
+### 3.21 Custom Model UI Improvements
+
+| Feature | Description |
+|---------|-------------|
+| **Provider dropdown** | Provider field changed from free-text input to a dropdown selector with all supported providers |
+| **Custom models in ModelSwitcher** | User-registered custom models appear alongside built-in models in the ModelSwitcher component |
+| **OpenRouter proxy** | Custom models with `openrouter` provider automatically route through the CORS proxy |
+
+### 3.22 Mobile Responsive Design
+
+| Breakpoint | Component | Behavior |
+|------------|-----------|----------|
+| `< 768px` | Sidebar | Slide-in drawer with backdrop overlay |
+| `< 768px` | FeatureNav | Compact horizontal scroll |
+| `< 768px` | Artifacts | Full-screen overlay |
+| `< 768px` | Settings dialog | Horizontal icon tabs (no text labels) |
+| `< 768px` | Header | Hamburger menu, non-essential buttons hidden |
+| `>= 768px` | All | Full 3-column desktop layout |
+
 ---
 
 ## 4. Authentication & User Management
@@ -597,7 +725,12 @@ The login system (`LoginPage.tsx` + `AuthContext.tsx`) supports multiple authent
 | **Email/Password** (Supabase Auth) | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` configured |
 | **Google OAuth** (Supabase) | Google provider enabled in Supabase + Google Cloud credentials |
 | **Google OAuth** (Legacy GIS) | `VITE_GOOGLE_CLIENT_ID` set (fallback when Supabase not configured) |
-| **Demo account** | Always available — username `demo`, password `demo` |
+| **Demo account** | Always available — email `demo`, password `demo` (no hint shown on login page) |
+
+**Login/Register UI:**
+- Login and Register presented as tabs (not separate pages)
+- Email + password fields (not username-based)
+- No demo credentials hint displayed on the login page
 
 **Registration features:**
 - Supabase Auth `signUp` with email confirmation
@@ -635,6 +768,7 @@ Stored in the `profiles.membership_tier` column with a CHECK constraint.
   - View user profile details
   - Change membership tier (Classic / Pro / Ultra)
 - Admin bypasses rate limits (no server-side enforcement yet; planned)
+- Admin bypasses all conversation and folder locks (no password prompt)
 - RLS policies in Supabase allow admin email to read/update any profile
 
 ---
@@ -679,6 +813,7 @@ https://openrouter.ai/
 | **Settings export excludes keys** | `exportSettings()` explicitly clears `apiKeys: {}` |
 | **Settings import preserves keys** | `importSettings()` never overwrites existing API keys |
 | **Input length limits** | System prompt: 8192 chars, model ID: 128 chars, display name: 100 chars, bio: 500 chars, custom instructions: 2000 chars |
+| **Chat/folder locks** | SHA-256 hashed passwords via Web Crypto API; only hash stored (in conversation/folder metadata); session-based unlock (Set in component state); admin bypass |
 
 ### 5.3 Database Security (Supabase)
 
@@ -850,6 +985,7 @@ The application uses `CustomEvent` dispatching on `window` for cross-component c
 | `conv-messages-updated` | `{ conversationId }` | ChatInterface | ConversationBranch |
 | `branch-data-changed` | `{ conversationId }` | ConversationBranch | ChatInterface |
 | `memory-add` | `{ label, category, excerpt, ... }` | ChatInterface | MemoryMapPage |
+| `storage-remote-update` | `{ namespace, data }` | supabase-sync (Realtime) | SettingsContext (API key merge) |
 
 ---
 
@@ -903,7 +1039,7 @@ CSS overrides applied when `data-theme="light"` on root element. Inverts the dar
 
 | Breakpoint | Behavior |
 |------------|----------|
-| `< 768px` (mobile) | Sidebar becomes slide-in drawer with overlay backdrop; Artifacts panel becomes full-screen overlay; Feature tabs scroll horizontally; Web search toggle hidden; Memory Map link hidden; Settings dialog tabs become horizontal icon bar |
+| `< 768px` (mobile) | Sidebar becomes slide-in drawer with overlay backdrop; Artifacts panel becomes full-screen overlay; Feature tabs scroll horizontally; Web search toggle hidden; Memory Map link hidden; Settings dialog tabs become horizontal icon bar (no text labels); Header shows hamburger menu, non-essential buttons hidden |
 | `>= 768px` (desktop) | Full 3-column layout; Sidebar inline and collapsible; Artifacts panel resizable side panel |
 
 ---
@@ -1027,7 +1163,7 @@ ai-workbench/
 │
 ├── client/                           # React 19 SPA
 │   ├── public/
-│   │   └── logos/                   # Provider logo SVGs (openai, anthropic, google, etc.)
+│   │   └── logos/                   # Provider logo SVGs + app-logo.png (app icon) + ai-workbench.png (brand wordmark)
 │   └── src/
 │       ├── main.tsx                 # Vite entry point
 │       ├── App.tsx                  # Root component: AuthProvider → SettingsProvider → Router
@@ -1048,6 +1184,7 @@ ai-workbench/
 │       │   ├── Sidebar.tsx          # Collapsible sidebar with chat history and folders
 │       │   ├── SettingsDialog.tsx   # Full settings modal (8 tabs)
 │       │   ├── NotificationPanel.tsx # Notification dropdown panel
+│       │   ├── AppLogo.tsx          # Reusable app logo component (renders app-logo.png)
 │       │   ├── ComputeToggle.tsx    # Compute mode toggle
 │       │   ├── ErrorBoundary.tsx    # React error boundary
 │       │   └── ui/                  # 53+ shadcn/ui components (Radix-based)

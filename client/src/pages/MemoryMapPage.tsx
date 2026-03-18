@@ -518,6 +518,46 @@ export default function MemoryMapPage() {
             ))}
           </div>
 
+          {/* Semantic Threshold Slider */}
+          <div className="flex items-center gap-2 bg-white/5 rounded-xl border border-white/10 px-3 py-1.5">
+            <Sparkles size={12} className={cn(
+              "shrink-0 transition-colors",
+              isComputingSemantic ? "text-amber-400 animate-pulse" : hasGoogleKey ? "text-violet-400" : "text-white/20",
+            )} />
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[9px] text-white/35 uppercase tracking-wider whitespace-nowrap">
+                  {lang === "en" ? "Semantic" : "語意"}
+                </span>
+                <span className="text-[10px] text-violet-400/80 font-mono tabular-nums w-7 text-right">
+                  {(semanticThreshold * 100).toFixed(0)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="30"
+                max="95"
+                value={semanticThreshold * 100}
+                onChange={e => setSemanticThreshold(Number(e.target.value) / 100)}
+                disabled={!hasGoogleKey}
+                className="w-20 h-1 appearance-none rounded-full bg-white/10 accent-violet-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-400 [&::-webkit-slider-thumb]:appearance-none"
+                title={hasGoogleKey
+                  ? (lang === "en" ? "Semantic similarity threshold — lower = more connections" : "語意相似度閾值 — 越低連線越多")
+                  : (lang === "en" ? "Requires Google API key" : "需要 Google API Key")}
+              />
+            </div>
+            {isComputingSemantic && semanticProgress && (
+              <span className="text-[9px] text-amber-400/60 whitespace-nowrap">
+                {semanticProgress.done}/{semanticProgress.total}
+              </span>
+            )}
+            {!isComputingSemantic && semanticEdges.length > 0 && (
+              <span className="text-[9px] text-violet-400/50 whitespace-nowrap">
+                {semanticEdges.length} {lang === "en" ? "links" : "連結"}
+              </span>
+            )}
+          </div>
+
           {/* Zoom (compact) */}
           <div className="flex items-center gap-0.5">
             <button
@@ -737,9 +777,19 @@ export default function MemoryMapPage() {
                   ? `rgba(167,139,250,${alpha + 0.3})`
                   : `rgba(167,139,250,${alpha})`;
 
-                const topicLabel = edge.sharedTopics.length > 0
-                  ? edge.sharedTopics.slice(0, 2).join(" · ")
-                  : `${(edge.similarity * 100).toFixed(0)}%`;
+                // Show related topics/content, fallback to node labels
+                let topicLabel: string;
+                if (edge.sharedTopics.length > 0) {
+                  topicLabel = edge.sharedTopics.slice(0, 2).join(" · ");
+                } else {
+                  const fromNode = nodes.find(n => n.id === edge.from);
+                  const toNode = nodes.find(n => n.id === edge.to);
+                  const fromLabel = fromNode?.label || "";
+                  const toLabel = toNode?.label || "";
+                  topicLabel = fromLabel && toLabel
+                    ? `${fromLabel.slice(0, 8)}↔${toLabel.slice(0, 8)}`
+                    : (lang === "en" ? "related" : "相關");
+                }
 
                 return (
                   <g key={`sem-${i}`}>

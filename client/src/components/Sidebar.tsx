@@ -337,6 +337,7 @@ interface FolderNodeProps {
   onLockChat: (chatId: string, mode: "set" | "unlock") => void;
   onLockFolder: (folderId: string, mode: "set" | "unlock") => void;
   unlockedIds: Set<string>;
+  isAdmin: boolean;
 }
 
 function FolderNode({
@@ -352,7 +353,7 @@ function FolderNode({
   renamingId, renameValue, setRenameValue, handleRenameConfirm, setRenamingId,
   editingPromptFolderId, promptEditValue, setPromptEditValue, handlePromptEditToggle,
   lang,
-  onLockChat, onLockFolder, unlockedIds,
+  onLockChat, onLockFolder, unlockedIds, isAdmin,
 }: FolderNodeProps) {
   const isDefault = DEFAULT_FOLDER_IDS.has(folder.id);
   const totalCount = countAllChats(folder);
@@ -469,7 +470,7 @@ function FolderNode({
           />
         </div>
       )}
-      {expandedFolders.has(folder.id) && (
+      {expandedFolders.has(folder.id) && !(folder.lockHash && !unlockedIds.has(folder.id) && !isAdmin) && (
         <div className="ml-2 space-y-0.5">
           {folder.chats.map(chat => (
             <button
@@ -501,7 +502,12 @@ function FolderNode({
                   />
                 ) : (
                   <>
-                    <p className="text-xs truncate leading-tight">{chat.title}</p>
+                    <p className={cn("text-xs truncate leading-tight", chat.lockHash && !unlockedIds.has(chat.id) && !isAdmin && "text-white/30 italic")}>
+                      {chat.lockHash && !unlockedIds.has(chat.id) && !isAdmin && "🔒 "}
+                      {chat.lockHash && !unlockedIds.has(chat.id) && !isAdmin
+                        ? (lang === "en" ? "Locked" : "已鎖定")
+                        : chat.title}
+                    </p>
                     <p className="text-[0.65rem] text-white/25 mt-0.5">{chat.time}</p>
                   </>
                 )}
@@ -577,6 +583,7 @@ function FolderNode({
               onLockChat={onLockChat}
               onLockFolder={onLockFolder}
               unlockedIds={unlockedIds}
+              isAdmin={isAdmin}
             />
           ))}
         </div>
@@ -645,6 +652,14 @@ export default function Sidebar({
     mode: "set" | "unlock" | "removeLock"
   } | null>(null);
   const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+
+  // Locked folder drop confirmation
+  const [lockDropConfirm, setLockDropConfirm] = useState<{
+    chatId: string
+    targetFolderId: string
+    folderName: string
+  } | null>(null);
+  const [lockDropSkipFolders, setLockDropSkipFolders] = useState<Set<string>>(new Set());
 
   // Guard: track last serialized folders to prevent infinite event loops
   const lastFolderJsonRef = useRef("");
@@ -740,6 +755,12 @@ export default function Sidebar({
   };
 
   const handleDeleteChat = useCallback((chatId: string) => {
+    // Block delete if chat is locked
+    const chat = flattenFolders(folders).flatMap(f => f.chats).find(c => c.id === chatId);
+    if (chat?.lockHash && !unlockedIds.has(chatId) && !isAdmin) {
+      toast.error(lang === "en" ? "Unlock this chat before deleting" : "請先解鎖才能刪除");
+      return;
+    }
     if (deleteConfirmId === chatId) {
       // Second click — actually delete
       setFolders(prev => removeChatFromTree(prev, chatId));
@@ -886,7 +907,13 @@ export default function Sidebar({
   const handleDeleteFolder = (folderId: string) => {
     if (DEFAULT_FOLDER_IDS.has(folderId)) return;
     const result = findFolderById(folders, folderId);
-    if (!result || countAllChats(result.folder) > 0) return;
+    if (!result) return;
+    // Block delete if folder is locked
+    if (result.folder.lockHash && !unlockedIds.has(folderId) && !isAdmin) {
+      toast.error(lang === "en" ? "Unlock this folder before deleting" : "請先解鎖才能刪除");
+      return;
+    }
+    if (countAllChats(result.folder) > 0) return;
     setFolders((prev) => removeFolderFromTree(prev, folderId));
     toast.info(t("sidebar.folderDeleted", lang));
   };
@@ -976,7 +1003,16 @@ export default function Sidebar({
   };
 
   // --- Move chat to folder (shared by drag-drop & context menu) ---
-  const moveChatToFolder = (chatId: string, targetFolderId: string) => {
+  const moveChatToFolder = (chatId: string, targetFolderId: string, skipLockCheck = false) => {
+    // Check if target folder is locked — show confirmation unless skipped
+    if (!skipLockCheck && !isAdmin) {
+      const targetFolder = flattenFolders(folders).find(f => f.id === targetFolderId);
+      if (targetFolder?.lockHash && !lockDropSkipFolders.has(targetFolderId)) {
+        setLockDropConfirm({ chatId, targetFolderId, folderName: targetFolder.name });
+        return;
+      }
+    }
+
     const allFlat = flattenFolders(folders);
     let chatToMove: ChatItem | null = null;
     for (const f of allFlat) {
@@ -1176,12 +1212,21 @@ export default function Sidebar({
       )}>
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <img src="/logos/app-logo.svg" alt="" width={28} height={28} className="rounded-lg" />
-            <span className="font-semibold text-sm text-white/90 tracking-tight">AI Workbench</span>
+            <img src="/logos/app-logo.png" alt="" width={28} height={28} className="rounded-lg" style={{ objectFit: "cover" }} />
+            <img
+              src="/logos/ai-workbench.png"
+              alt="AI Workbench"
+              height={22}
+              className="h-[22px] w-auto"
+              style={{
+                maskImage: "linear-gradient(to right, black 85%, transparent 100%)",
+                WebkitMaskImage: "linear-gradient(to right, black 85%, transparent 100%)",
+              }}
+            />
           </div>
         )}
         {collapsed && (
-          <img src="/logos/app-logo.svg" alt="" width={28} height={28} className="rounded-lg" />
+          <img src="/logos/app-logo.png" alt="" width={28} height={28} className="rounded-lg" style={{ objectFit: "cover" }} />
         )}
         <Button
           variant="ghost"
@@ -1307,6 +1352,7 @@ export default function Sidebar({
             onLockChat={handleLockChat}
             onLockFolder={handleLockFolder}
             unlockedIds={unlockedIds}
+            isAdmin={isAdmin}
           />
         ))}
         {/* Create Folder button */}
@@ -1478,6 +1524,73 @@ export default function Sidebar({
           lang={lang}
         />
       )}
+
+      {/* Locked folder drop confirmation */}
+      {lockDropConfirm && (() => {
+        const [dontAskChecked, setDontAskChecked] = [
+          lockDropSkipFolders.has(lockDropConfirm.targetFolderId),
+          (v: boolean) => {
+            if (v) setLockDropSkipFolders(prev => new Set([...prev, lockDropConfirm.targetFolderId]));
+            else setLockDropSkipFolders(prev => { const n = new Set(prev); n.delete(lockDropConfirm.targetFolderId); return n; });
+          },
+        ] as const;
+        return (
+          <>
+            <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm" onClick={() => setLockDropConfirm(null)} />
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 pointer-events-none">
+              <div
+                className="pointer-events-auto w-full max-w-xs rounded-2xl border border-amber-500/20 bg-[oklch(0.12_0.015_265)] shadow-2xl shadow-black/60 p-5"
+                style={{ fontSize: 14 }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <Lock size={16} className="text-amber-400" />
+                  <span className="text-sm font-semibold text-white/90">
+                    {lang === "en" ? "Move to Locked Folder" : "移動至已鎖定的資料夾"}
+                  </span>
+                </div>
+                <p className="text-xs text-white/60 leading-relaxed mb-4">
+                  {lang === "en"
+                    ? `"${lockDropConfirm.folderName}" is locked. The conversation will be locked with this folder. Continue?`
+                    : `「${lockDropConfirm.folderName}」已鎖定。對話將隨此資料夾一同被鎖定。確認移入？`}
+                </p>
+                <label className="flex items-center gap-2 mb-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lockDropSkipFolders.has(lockDropConfirm.targetFolderId)}
+                    onChange={e => {
+                      if (e.target.checked) setLockDropSkipFolders(prev => new Set([...prev, lockDropConfirm.targetFolderId]));
+                      else setLockDropSkipFolders(prev => { const n = new Set(prev); n.delete(lockDropConfirm.targetFolderId); return n; });
+                    }}
+                    className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-amber-500"
+                  />
+                  <span className="text-[11px] text-white/40">
+                    {lang === "en" ? "Don't ask again for this folder (this session)" : "本次登入不再對此資料夾提示"}
+                  </span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setLockDropConfirm(null)}
+                    className="flex-1 px-3 py-2 rounded-lg text-xs text-white/50 bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    {lang === "en" ? "Cancel" : "取消"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const { chatId, targetFolderId } = lockDropConfirm;
+                      setLockDropConfirm(null);
+                      moveChatToFolder(chatId, targetFolderId, true);
+                    }}
+                    className="flex-1 px-3 py-2 rounded-lg text-xs font-medium text-amber-300 bg-amber-500/15 border border-amber-500/25 hover:bg-amber-500/25 transition-colors"
+                  >
+                    {lang === "en" ? "Confirm" : "確認移入"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </aside>
   );
 }

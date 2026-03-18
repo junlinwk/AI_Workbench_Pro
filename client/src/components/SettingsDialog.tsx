@@ -432,7 +432,18 @@ function ModelsTab() {
           }
         }
 
-        const res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+        // Route CORS-blocked providers through proxy
+        let res: Response;
+        if (providerId === "openrouter") {
+          res = await fetch("/api/ai/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint, headers, body }),
+            signal: AbortSignal.timeout(10000),
+          });
+        } else {
+          res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+        }
         results[model.id] = res.ok ? "ok" : "fail";
       } catch {
         results[model.id] = "fail";
@@ -662,13 +673,16 @@ function ModelsTab() {
               </div>
               <div>
                 <label className="text-[11px] text-white/40 mb-1 block">{t("models.provider", lang)}</label>
-                <input
-                  type="text"
+                <select
                   value={newModel.providerId}
                   onChange={e => setNewModel(prev => ({ ...prev, providerId: e.target.value }))}
-                  placeholder="e.g. openai"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white/70 placeholder:text-white/20 focus:outline-none focus:border-blue-500/40"
-                />
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/70 focus:outline-none focus:border-blue-500/40"
+                >
+                  <option value="" className="bg-[oklch(0.12_0.015_265)]">{lang === "en" ? "Select provider..." : "選擇供應商..."}</option>
+                  {MODEL_PROVIDERS.map(p => (
+                    <option key={p.id} value={p.id} className="bg-[oklch(0.12_0.015_265)]">{p.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="text-[11px] text-white/40 mb-1 block">{t("models.endpoint", lang)}</label>

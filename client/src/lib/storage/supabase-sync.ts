@@ -58,18 +58,18 @@ export function startSyncEngine(userId: string): void {
       console.warn("[SyncEngine] Startup error:", err)
     })
 
-  // Periodic drain every 5 seconds to catch queued writes
+  // Periodic drain every 3 seconds to catch queued writes
   drainTimer = setInterval(() => {
     if (navigator.onLine && currentUserId && !isDraining) {
-      drainSyncQueue(currentUserId).catch(() => {})
+      drainSyncQueue(currentUserId).catch(() => { })
     }
-  }, 5_000)
+  }, 3_000)
 
   onlineHandler = () => {
     console.log("[SyncEngine] Online — draining queue")
     drainSyncQueue(userId)
       .then(() => subscribeRealtime(userId))
-      .catch(() => {})
+      .catch(() => { })
   }
   offlineHandler = () => {
     console.log("[SyncEngine] Offline — pausing sync")
@@ -107,7 +107,7 @@ export function stopSyncEngine(): void {
  */
 export function triggerSync(): void {
   if (currentUserId && navigator.onLine) {
-    drainSyncQueue(currentUserId).catch(() => {})
+    drainSyncQueue(currentUserId).catch(() => { })
   }
 }
 
@@ -292,6 +292,13 @@ function subscribeRealtime(userId: string): void {
         const remoteVersion = ((newRow as Record<string, unknown>).version as number) ?? 0
 
         console.log(`[SyncEngine] Realtime update: ${namespace}`)
+
+        // Notify listeners (e.g. SettingsContext) of remote changes
+        window.dispatchEvent(
+          new CustomEvent("storage-remote-update", {
+            detail: { namespace, data: remoteData },
+          }),
+        )
 
         const local = await idbGet(userId, namespace)
         if (local) {

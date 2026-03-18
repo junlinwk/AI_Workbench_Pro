@@ -381,10 +381,10 @@ export default function LoginPage() {
           `,
         }}
       >
-        {/* Logo — uses unified /logos/app-logo.svg */}
+        {/* Logo — uses unified /logos/app-logo.png */}
         <div className="flex flex-col items-center mb-6">
           <img
-            src="/logos/app-logo.svg"
+            src="/logos/app-logo.png"
             alt="AI Workbench"
             width={64}
             height={64}
