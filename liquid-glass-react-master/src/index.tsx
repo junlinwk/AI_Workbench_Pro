@@ -232,6 +232,8 @@ const GlassContainer = forwardRef<
             style={{
               position: "relative",
               zIndex: 1,
+              flex: 1,
+              minWidth: 0,
               font: "500 20px/1 system-ui",
               textShadow: overLight ? "0px 2px 12px rgba(0, 0, 0, 0)" : "0px 2px 12px rgba(0, 0, 0, 0.4)",
             }}
