@@ -270,7 +270,7 @@ function LockDialog({
               />
             )}
             {error && (
-              <p className="text-[10px] text-red-400">{error}</p>
+              <p className="text-[0.65rem] text-red-400">{error}</p>
             )}
           </div>
           <div className="flex gap-2 mt-4">
@@ -393,15 +393,15 @@ function FolderNode({
                 if (e.key === "Enter") handleFolderRenameConfirm();
                 if (e.key === "Escape") setRenamingFolderId(null);
               }}
-              className="flex-1 min-w-0 bg-white/10 border border-blue-500/40 rounded px-1 py-0.5 text-[10px] text-white/80 focus:outline-none font-medium tracking-wide uppercase"
+              className="flex-1 min-w-0 bg-white/10 border border-blue-500/40 rounded px-1 py-0.5 text-[0.65rem] text-white/80 focus:outline-none font-medium tracking-wide uppercase"
               autoFocus
               onClick={e => e.stopPropagation()}
             />
           ) : (
-            <span className="font-medium tracking-wide uppercase text-[10px] truncate">{folder.name}</span>
+            <span className="font-medium tracking-wide uppercase text-[0.65rem] truncate">{folder.name}</span>
           )}
         </button>
-        <span className="text-[10px] text-white/20 shrink-0">{totalCount}</span>
+        <span className="text-[0.65rem] text-white/20 shrink-0">{totalCount}</span>
         {/* Lock icon for folders */}
         {!isDefault && (
           <button
@@ -463,7 +463,7 @@ function FolderNode({
               if (e.key === "Escape") { setPromptEditValue(""); handlePromptEditToggle(folder.id); }
             }}
             placeholder={lang === "en" ? "Folder prompt (injected as context)..." : "資料夾提示（注入為上下文）..."}
-            className="w-full bg-white/5 border border-blue-500/30 rounded-lg px-2 py-1.5 text-[10px] text-white/70 placeholder:text-white/20 focus:outline-none focus:border-blue-500/50 resize-none"
+            className="w-full bg-white/5 border border-blue-500/30 rounded-lg px-2 py-1.5 text-[0.65rem] text-white/70 placeholder:text-white/20 focus:outline-none focus:border-blue-500/50 resize-none"
             rows={2}
             autoFocus
           />
@@ -502,7 +502,7 @@ function FolderNode({
                 ) : (
                   <>
                     <p className="text-xs truncate leading-tight">{chat.title}</p>
-                    <p className="text-[10px] text-white/25 mt-0.5">{chat.time}</p>
+                    <p className="text-[0.65rem] text-white/25 mt-0.5">{chat.time}</p>
                   </>
                 )}
               </div>
@@ -1267,7 +1267,7 @@ export default function Sidebar({
             <p className="text-xs text-white/25">
               {lang === "en" ? "No conversations yet" : "尚無對話紀錄"}
             </p>
-            <p className="text-[10px] text-white/15 mt-1">
+            <p className="text-[0.65rem] text-white/15 mt-1">
               {lang === "en" ? "Start a new chat to begin" : "開始新對話吧"}
             </p>
           </div>
@@ -1320,7 +1320,7 @@ export default function Sidebar({
             className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-white/25 hover:text-white/50 hover:bg-white/4 transition-colors mt-1"
           >
             <FolderPlus size={12} />
-            <span className="text-[10px] font-medium">{t("sidebar.createFolder", lang)}</span>
+            <span className="text-[0.65rem] font-medium">{t("sidebar.createFolder", lang)}</span>
           </button>
         )}
         {collapsed && (
@@ -1452,7 +1452,7 @@ export default function Sidebar({
             )}
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-white/80 truncate">{user?.username || t("sidebar.user", lang)}</p>
-              <p className="text-[10px] text-white/35 truncate">{user?.email || t("sidebar.plan", lang)}</p>
+              <p className="text-[0.65rem] text-white/35 truncate">{user?.email || t("sidebar.plan", lang)}</p>
             </div>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-white/30 hover:text-white/60 hover:bg-white/5"
               onClick={onOpenSettings}>

@@ -381,44 +381,16 @@ export default function LoginPage() {
           `,
         }}
       >
-        {/* Logo */}
+        {/* Logo — uses unified /logos/app-logo.svg */}
         <div className="flex flex-col items-center mb-6">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-            style={{
-              background:
-                "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
-              boxShadow:
-                "0 8px 32px oklch(0.5 0.2 255 / 30%)",
-            }}
-          >
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 2a4 4 0 0 1 4 4v1a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2V6a4 4 0 0 1 4-4z" />
-              <circle
-                cx="9"
-                cy="9"
-                r="0.5"
-                fill="white"
-              />
-              <circle
-                cx="15"
-                cy="9"
-                r="0.5"
-                fill="white"
-              />
-              <path d="M8 14v2a4 4 0 0 0 8 0v-2" />
-              <path d="M6 18a8 8 0 0 0 12 0" />
-            </svg>
-          </div>
+          <img
+            src="/logos/app-logo.svg"
+            alt="AI Workbench"
+            width={64}
+            height={64}
+            className="mb-4 rounded-2xl"
+            style={{ boxShadow: "0 8px 32px oklch(0.5 0.2 255 / 30%)" }}
+          />
           <h1
             className="text-2xl font-bold tracking-tight"
             style={{ color: "oklch(0.95 0 0)" }}

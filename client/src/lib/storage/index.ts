@@ -35,7 +35,7 @@ function cacheKey(userId: string, namespace: string): string {
 // ---------------------------------------------------------------------------
 
 const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>()
-const SYNC_DEBOUNCE_MS = 1500 // Wait 1.5s after last write before queuing
+const SYNC_DEBOUNCE_MS = 800 // Wait 0.8s after last write before queuing
 
 function debouncedSyncEnqueue(
   userId: string,

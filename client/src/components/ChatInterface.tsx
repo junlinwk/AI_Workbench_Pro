@@ -197,7 +197,7 @@ function MessageBubble({
               <User size={14} className="text-white" />
             )
           ) : (
-            <Sparkles size={14} className="text-white" />
+            <img src="/logos/app-logo.svg" alt="AI" className="w-8 h-8 rounded-full" />
           )}
         </div>
       )}

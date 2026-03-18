@@ -25,6 +25,7 @@ let realtimeChannel: RealtimeChannel | null = null
 let onlineHandler: (() => void) | null = null
 let offlineHandler: (() => void) | null = null
 let drainTimer: ReturnType<typeof setTimeout> | null = null
+let isDraining = false // Prevent concurrent drains (race condition guard)
 
 // Cache reference for updating in-memory cache from remote pulls
 let cacheRef: Map<string, unknown> | null = null
@@ -57,12 +58,12 @@ export function startSyncEngine(userId: string): void {
       console.warn("[SyncEngine] Startup error:", err)
     })
 
-  // Periodic drain every 10 seconds to catch queued writes
+  // Periodic drain every 5 seconds to catch queued writes
   drainTimer = setInterval(() => {
-    if (navigator.onLine && currentUserId) {
+    if (navigator.onLine && currentUserId && !isDraining) {
       drainSyncQueue(currentUserId).catch(() => {})
     }
-  }, 10_000)
+  }, 5_000)
 
   onlineHandler = () => {
     console.log("[SyncEngine] Online — draining queue")
@@ -190,6 +191,16 @@ async function initialPull(userId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function drainSyncQueue(userId: string): Promise<void> {
+  if (isDraining) return // Prevent concurrent drains
+  isDraining = true
+  try {
+    await _drainSyncQueueInner(userId)
+  } finally {
+    isDraining = false
+  }
+}
+
+async function _drainSyncQueueInner(userId: string): Promise<void> {
   const supabase = getSupabase()
   if (!supabase || !navigator.onLine) return
 
@@ -324,6 +335,14 @@ function subscribeRealtime(userId: string): void {
     )
     .subscribe((status) => {
       console.log("[SyncEngine] Realtime status:", status)
+      if (status === "CHANNEL_ERROR") {
+        // Retry after a short delay — CHANNEL_ERROR often resolves on reconnect
+        console.warn("[SyncEngine] Channel error — will retry in 3s")
+        setTimeout(() => {
+          unsubscribeRealtime()
+          if (syncActive && currentUserId) subscribeRealtime(currentUserId)
+        }, 3000)
+      }
     })
 }
 

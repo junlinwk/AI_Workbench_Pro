@@ -150,8 +150,10 @@ export async function callAI(
 
   let res: Response
   try {
-    // Only use server proxy on localhost (Vercel Hobby plan has 10s timeout — too short for AI)
-    const useProxy = window.location.hostname === "localhost"
+    // Use proxy on localhost always, and on production for CORS-blocked providers (OpenRouter)
+    const useProxy =
+      window.location.hostname === "localhost" ||
+      model.providerId === "openrouter"
 
     if (useProxy) {
       res = await fetch("/api/ai/chat", {
