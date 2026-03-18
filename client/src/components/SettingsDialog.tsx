@@ -337,7 +337,7 @@ function ChatTab() {
       </div>
 
       {/* System Prompt */}
-      <div className="py-3">
+      <div className="py-3 border-b border-white/6">
         <p className="text-sm text-white/80 mb-1">{t("chatSettings.systemPrompt", lang)}</p>
         <p className="text-xs text-white/35 mb-2">{t("chatSettings.systemPromptDesc", lang)}</p>
         <textarea
@@ -348,6 +348,22 @@ function ChatTab() {
           className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/80 placeholder:text-white/20 focus:outline-none focus:border-blue-500/40 resize-none"
         />
       </div>
+
+      {/* Voice Language */}
+      <SettingRow
+        label={lang === "en" ? "Voice Language" : "語音語言偏好"}
+        description={lang === "en" ? "Language hint for speech recognition (STT) and text-to-speech (TTS)" : "語音辨識 (STT) 與朗讀 (TTS) 的語言偏好設定"}
+      >
+        <SelectButton<"auto" | "zh" | "en">
+          value={settings.voiceLanguage}
+          onChange={v => updateSetting("voiceLanguage", v)}
+          options={[
+            { value: "auto", label: "Auto" },
+            { value: "zh", label: "中文" },
+            { value: "en", label: "English" },
+          ]}
+        />
+      </SettingRow>
     </div>
   );
 }

@@ -85,6 +85,9 @@ export interface Settings {
   saveHistory: boolean
   shareAnalytics: boolean
 
+  // Voice
+  voiceLanguage: "auto" | "zh" | "en"
+
   // Notifications
   enableNotifications: boolean
   soundEnabled: boolean
@@ -121,6 +124,7 @@ const DEFAULT_SETTINGS: Settings = {
   membershipTier: "classic",
   saveHistory: true,
   shareAnalytics: false,
+  voiceLanguage: "auto",
   enableNotifications: true,
   soundEnabled: false,
   userProfile: {
@@ -195,6 +199,8 @@ function validateSettings(raw: any): Partial<Settings> {
     out.saveHistory = raw.saveHistory
   if (typeof raw.shareAnalytics === "boolean")
     out.shareAnalytics = raw.shareAnalytics
+  if (["auto", "zh", "en"].includes(raw.voiceLanguage))
+    out.voiceLanguage = raw.voiceLanguage
   if (typeof raw.enableNotifications === "boolean")
     out.enableNotifications = raw.enableNotifications
   if (typeof raw.soundEnabled === "boolean")

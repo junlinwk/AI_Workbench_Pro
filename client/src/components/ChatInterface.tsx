@@ -148,6 +148,7 @@ function MessageBubble({
   conversationId,
   effectiveUserId,
   groqApiKey,
+  voiceLanguage = "auto",
 }: {
   message: Message
   showAvatar: boolean
@@ -159,6 +160,7 @@ function MessageBubble({
   conversationId?: string
   effectiveUserId: string
   groqApiKey?: string
+  voiceLanguage?: "auto" | "zh" | "en"
 }) {
   const [copied, setCopied] = useState(false)
   const [feedback, setFeedback] = useState<"up" | "down" | null>(
@@ -182,7 +184,7 @@ function MessageBubble({
     }
     setIsSpeaking(true)
     try {
-      await textToSpeech(message.content, groqApiKey)
+      await textToSpeech(message.content, groqApiKey, voiceLanguage)
     } catch {
       // silent fail
     } finally {
@@ -1220,7 +1222,7 @@ export default function ChatInterface({
         try {
           let text = ""
           if (groqApiKey) {
-            text = await transcribeAudio(blob, groqApiKey)
+            text = await transcribeAudio(blob, groqApiKey, settings.voiceLanguage)
           } else if (hasSpeechRecognition()) {
             text = await browserTranscribe()
           } else {
@@ -1599,7 +1601,10 @@ export default function ChatInterface({
     }
 
     const folderContext = folderPrompt ? `\n\n--- Folder Context ---\n${folderPrompt}` : ""
-    const fullSystemPrompt = systemBase + userProfileContext + pinnedContext + memoryContext + folderContext + webAndUrlContext
+    const gestureContext = handGestureMode
+      ? "\n\n--- Conversation Mode ---\nThe user is in hands-free gesture conversation mode. Keep responses short and concise (1-3 sentences). Answer directly, no lengthy explanations. Think of this as a quick voice chat."
+      : ""
+    const fullSystemPrompt = systemBase + userProfileContext + pinnedContext + memoryContext + folderContext + webAndUrlContext + gestureContext
 
     // Real API call — registered as global pending so it survives tab switches
     try {
@@ -1666,9 +1671,9 @@ export default function ChatInterface({
       // Extract code blocks and send to Artifacts panel
       extractAndDispatchCodeBlocks(response)
 
-      // Voice mode: speak the response and re-trigger recording
-      if (voiceMode && groqApiKey) {
-        textToSpeech(response.slice(0, 2000), groqApiKey)
+      // Voice/gesture mode: speak the response aloud
+      if ((voiceMode || handGestureMode) && groqApiKey) {
+        textToSpeech(response.slice(0, 2000), groqApiKey, settings.voiceLanguage)
           .then(() => {
             if (voiceMode) startRecording()
           })
@@ -2115,6 +2120,7 @@ export default function ChatInterface({
                   conversationId={conversationId}
                   effectiveUserId={effectiveUserId}
                   groqApiKey={groqApiKey}
+                  voiceLanguage={settings.voiceLanguage}
                 />
               </div>
             ))}

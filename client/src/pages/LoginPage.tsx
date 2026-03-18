@@ -208,11 +208,12 @@ function getStoredLanguage(): "zh-TW" | "en" {
 // ---------------------------------------------------------------------------
 //  Shared input style helpers
 // ---------------------------------------------------------------------------
-const inputStyle = {
+const inputStyle: React.CSSProperties = {
   background: "oklch(0.1 0.008 265 / 60%)",
   border: "1px solid oklch(1 0 0 / 8%)",
   color: "oklch(0.9 0 0)",
   boxShadow: "inset 0 1px 3px oklch(0 0 0 / 20%)",
+  borderRadius: "9999px",
 }
 
 function handleInputFocus(
@@ -356,14 +357,21 @@ export default function LoginPage() {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden"
-      style={{ background: "oklch(0.05 0.012 265)" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        overflow: "hidden",
+        background: "oklch(0.05 0.012 265)",
+      }}
     >
       {/* Hyperspeed Three.js road background — fixed full viewport */}
       <Suspense fallback={null}>
         <div
-          className="pointer-events-none"
-          style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh" }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
         >
           <Hyperspeed effectOptions={HYPERSPEED_OPTIONS} />
         </div>
@@ -374,23 +382,37 @@ export default function LoginPage() {
         onClick={() =>
           setLang(lang === "zh-TW" ? "en" : "zh-TW")
         }
-        className="absolute top-6 right-6 z-20 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
         style={{
+          position: "absolute",
+          top: 24,
+          right: 24,
+          zIndex: 30,
+          padding: "6px 12px",
+          borderRadius: 8,
+          fontSize: "0.75rem",
+          fontWeight: 500,
           background: "oklch(1 0 0 / 5%)",
           border: "1px solid oklch(1 0 0 / 10%)",
           color: "oklch(0.7 0 0)",
+          cursor: "pointer",
         }}
       >
         {lang === "zh-TW" ? "EN" : "\u4e2d\u6587"}
       </button>
 
-      {/* Card — Liquid Glass wraps the entire form card */}
+      {/* Card — Liquid Glass */}
       <LiquidGlass
-        className="relative z-10 w-full max-w-md mx-4 rounded-3xl"
-        style={{ padding: 0 }}
-        padding="0px"
+        style={{
+          position: "relative",
+          zIndex: 10,
+          width: "100%",
+          maxWidth: 460,
+          margin: "0 16px",
+          borderRadius: 24,
+        }}
+        padding="32px 36px"
       >
-        <div className="p-6 sm:p-8">
+        <div>
         {/* Logo — uses unified /logos/app-logo.png */}
         <div className="flex flex-col items-center mb-6">
           <img
@@ -417,7 +439,7 @@ export default function LoginPage() {
 
         {/* Tabs */}
         <div
-          className="flex mb-6 rounded-xl p-1"
+          className="flex mb-6 rounded-full p-1"
           style={{
             background: "oklch(0.1 0.008 265 / 60%)",
             border: "1px solid oklch(1 0 0 / 6%)",
@@ -431,7 +453,7 @@ export default function LoginPage() {
                 setError("")
                 setSuccess("")
               }}
-              className="flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+              className="flex-1 py-2 rounded-full text-sm font-medium transition-all duration-200"
               style={{
                 background:
                   activeTab === tab
@@ -506,7 +528,7 @@ export default function LoginPage() {
                   }
                   placeholder={t.emailPlaceholder}
                   autoComplete="email"
-                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                  className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
                   style={inputStyle}
                   onFocus={handleInputFocus}
                   onBlur={handleInputBlur}
@@ -528,7 +550,7 @@ export default function LoginPage() {
                   }
                   placeholder={t.passwordPlaceholder}
                   autoComplete="current-password"
-                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                  className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
                   style={inputStyle}
                   onFocus={handleInputFocus}
                   onBlur={handleInputBlur}
@@ -538,7 +560,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loginDisabled}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   background:
                     "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
@@ -585,7 +607,7 @@ export default function LoginPage() {
             {/* Google OAuth button */}
             <button
               onClick={handleGoogleLogin}
-              className="w-full flex items-center justify-center gap-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer"
+              className="w-full flex items-center justify-center gap-3 py-3 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer"
               style={{
                 background: "oklch(0.97 0 0)",
                 color: "oklch(0.3 0 0)",
@@ -652,7 +674,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t.emailPlaceholder}
                 autoComplete="email"
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
                 style={inputStyle}
                 onFocus={handleInputFocus}
                 onBlur={handleInputBlur}
@@ -694,7 +716,7 @@ export default function LoginPage() {
                 }
                 placeholder={t.passwordPlaceholder}
                 autoComplete="new-password"
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
                 style={inputStyle}
                 onFocus={handleInputFocus}
                 onBlur={handleInputBlur}
@@ -726,7 +748,7 @@ export default function LoginPage() {
                 }
                 placeholder={t.confirmPasswordPlaceholder}
                 autoComplete="new-password"
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                className="w-full px-5 py-3 rounded-full text-sm outline-none transition-all"
                 style={inputStyle}
                 onFocus={handleInputFocus}
                 onBlur={handleInputBlur}
@@ -746,7 +768,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={registerDisabled}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 rounded-full text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background:
                   "linear-gradient(135deg, oklch(0.6 0.2 255), oklch(0.55 0.25 290))",
@@ -773,8 +795,13 @@ export default function LoginPage() {
 
       {/* Footer */}
       <p
-        className="mt-4 text-xs relative z-10"
-        style={{ color: "oklch(0.35 0 0)" }}
+        style={{
+          marginTop: 16,
+          fontSize: "0.75rem",
+          position: "relative",
+          zIndex: 10,
+          color: "oklch(0.35 0 0)",
+        }}
       >
         {t.footer}
       </p>

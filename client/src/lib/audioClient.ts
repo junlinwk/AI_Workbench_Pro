@@ -11,13 +11,17 @@
 export async function transcribeAudio(
   blob: Blob,
   apiKey: string,
+  language: "auto" | "zh" | "en" = "auto",
 ): Promise<string> {
   // Try direct Groq API first
   try {
     const formData = new FormData()
     formData.append("file", blob, "recording.webm")
     formData.append("model", "whisper-large-v3-turbo")
-    formData.append("language", "auto")
+    // Whisper accepts ISO 639-1 codes; "auto" is not a valid code so omit it
+    if (language !== "auto") {
+      formData.append("language", language)
+    }
 
     const res = await fetch(
       "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -66,8 +70,13 @@ export async function transcribeAudio(
 export async function textToSpeech(
   text: string,
   apiKey?: string,
+  language: "auto" | "zh" | "en" = "auto",
 ): Promise<void> {
   if (apiKey) {
+    // Pick voice based on language preference
+    // Arista = English-optimized, Fritz = multilingual/neutral
+    const voice = language === "zh" ? "Fritz-PlayAI" : "Arista-PlayAI"
+
     // Try direct Groq TTS
     try {
       const res = await fetch(
@@ -81,7 +90,7 @@ export async function textToSpeech(
           body: JSON.stringify({
             model: "playai-tts",
             input: text.slice(0, 4096),
-            voice: "Arista-PlayAI",
+            voice,
             response_format: "wav",
           }),
         },
@@ -121,6 +130,8 @@ export async function textToSpeech(
       const utterance = new SpeechSynthesisUtterance(text.slice(0, 4096))
       utterance.rate = 1.0
       utterance.pitch = 1.0
+      if (language === "zh") utterance.lang = "zh-TW"
+      else if (language === "en") utterance.lang = "en-US"
       utterance.onend = () => resolve()
       utterance.onerror = () => resolve()
       window.speechSynthesis.speak(utterance)
