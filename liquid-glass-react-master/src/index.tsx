@@ -441,7 +441,14 @@ export default function LiquidGlass({
     return () => window.removeEventListener("resize", updateGlassSize)
   }, [])
 
-  const transformStyle = `translate(calc(-50% + ${calculateElasticTranslation().x}px), calc(-50% + ${calculateElasticTranslation().y}px)) ${isActive && Boolean(onClick) ? "scale(0.96)" : calculateDirectionalScale()}`
+  const elasticT = calculateElasticTranslation()
+  // When used with absolute positioning (top/left: 50%), include the centering translate.
+  // When used with relative/flow positioning (top: auto), skip the centering offset.
+  const needsCentering = !style.top || (style.top !== "auto" && style.left !== "auto")
+  const translatePart = needsCentering
+    ? `translate(calc(-50% + ${elasticT.x}px), calc(-50% + ${elasticT.y}px))`
+    : `translate(${elasticT.x}px, ${elasticT.y}px)`
+  const transformStyle = `${translatePart} ${isActive && Boolean(onClick) ? "scale(0.96)" : calculateDirectionalScale()}`
 
   const baseStyle = {
     ...style,
@@ -449,42 +456,40 @@ export default function LiquidGlass({
     transition: "all ease-out 0.2s",
   }
 
-  const positionStyles = {
-    position: baseStyle.position || "relative",
-    top: baseStyle.top || "50%",
-    left: baseStyle.left || "50%",
+  // Overlay layers use absolute positioning to stack on top of the glass
+  const overlayStyles: CSSProperties = {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    borderRadius: `${cornerRadius}px`,
+    pointerEvents: "none",
   }
 
   return (
-    <>
+    <div
+      style={{
+        ...baseStyle,
+        position: (style.position as CSSProperties["position"]) || "relative",
+        top: style.top ?? "50%",
+        left: style.left ?? "50%",
+      }}
+    >
       {/* Over light effect */}
       <div
         className={`bg-black transition-all duration-150 ease-in-out pointer-events-none ${overLight ? "opacity-20" : "opacity-0"}`}
-        style={{
-          ...positionStyles,
-          height: glassSize.height,
-          width: glassSize.width,
-          borderRadius: `${cornerRadius}px`,
-          transform: baseStyle.transform,
-          transition: baseStyle.transition,
-        }}
+        style={overlayStyles}
       />
       <div
         className={`bg-black transition-all duration-150 ease-in-out pointer-events-none mix-blend-overlay ${overLight ? "opacity-100" : "opacity-0"}`}
-        style={{
-          ...positionStyles,
-          height: glassSize.height,
-          width: glassSize.width,
-          borderRadius: `${cornerRadius}px`,
-          transform: baseStyle.transform,
-          transition: baseStyle.transition,
-        }}
+        style={overlayStyles}
       />
 
       <GlassContainer
         ref={glassRef}
         className={className}
-        style={baseStyle}
+        style={{ width: "100%", transition: baseStyle.transition }}
         cornerRadius={cornerRadius}
         displacementScale={overLight ? displacementScale * 0.5 : displacementScale}
         blurAmount={blurAmount}
@@ -508,13 +513,7 @@ export default function LiquidGlass({
       {/* Border layer 1 - extracted from glass container */}
       <span
         style={{
-          ...positionStyles,
-          height: glassSize.height,
-          width: glassSize.width,
-          borderRadius: `${cornerRadius}px`,
-          transform: baseStyle.transform,
-          transition: baseStyle.transition,
-          pointerEvents: "none",
+          ...overlayStyles,
           mixBlendMode: "screen",
           opacity: 0.2,
           padding: "1.5px",
@@ -535,13 +534,7 @@ export default function LiquidGlass({
       {/* Border layer 2 - duplicate with mix-blend-overlay */}
       <span
         style={{
-          ...positionStyles,
-          height: glassSize.height,
-          width: glassSize.width,
-          borderRadius: `${cornerRadius}px`,
-          transform: baseStyle.transform,
-          transition: baseStyle.transition,
-          pointerEvents: "none",
+          ...overlayStyles,
           mixBlendMode: "overlay",
           padding: "1.5px",
           WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
@@ -563,12 +556,7 @@ export default function LiquidGlass({
         <>
           <div
             style={{
-              ...positionStyles,
-              height: glassSize.height,
-              width: glassSize.width + 1,
-              borderRadius: `${cornerRadius}px`,
-              transform: baseStyle.transform,
-              pointerEvents: "none",
+              ...overlayStyles,
               transition: "all 0.2s ease-out",
               opacity: isHovered || isActive ? 0.5 : 0,
               backgroundImage: "radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 50%)",
@@ -577,12 +565,7 @@ export default function LiquidGlass({
           />
           <div
             style={{
-              ...positionStyles,
-              height: glassSize.height,
-              width: glassSize.width + 1,
-              borderRadius: `${cornerRadius}px`,
-              transform: baseStyle.transform,
-              pointerEvents: "none",
+              ...overlayStyles,
               transition: "all 0.2s ease-out",
               opacity: isActive ? 0.5 : 0,
               backgroundImage: "radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0) 80%)",
@@ -591,14 +574,7 @@ export default function LiquidGlass({
           />
           <div
             style={{
-              ...baseStyle,
-              height: glassSize.height,
-              width: glassSize.width + 1,
-              borderRadius: `${cornerRadius}px`,
-              position: baseStyle.position,
-              top: baseStyle.top,
-              left: baseStyle.left,
-              pointerEvents: "none",
+              ...overlayStyles,
               transition: "all 0.2s ease-out",
               opacity: isHovered ? 0.4 : isActive ? 0.8 : 0,
               backgroundImage: "radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0) 100%)",
@@ -607,6 +583,6 @@ export default function LiquidGlass({
           />
         </>
       )}
-    </>
+    </div>
   )
 }
