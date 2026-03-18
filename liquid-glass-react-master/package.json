@@ -5,8 +5,19 @@
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
-  "workspaces": ["liquid-glass"],
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "workspaces": [
+    "liquid-glass"
+  ],
   "scripts": {
     "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:types",
     "build:esm": "esbuild src/index.tsx --bundle --format=esm --outfile=dist/index.esm.js --external:react --external:react-dom",
@@ -29,7 +40,12 @@
     "react-dom": "^18.2.0",
     "typescript": "^5.0.0"
   },
-  "keywords": ["react", "component", "library", "typescript"],
+  "keywords": [
+    "react",
+    "component",
+    "library",
+    "typescript"
+  ],
   "author": "",
   "license": "MIT",
   "repository": {
