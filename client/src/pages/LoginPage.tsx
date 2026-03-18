@@ -410,10 +410,10 @@ export default function LoginPage() {
       }}>
         <LiquidGlass
           mouseContainer={containerRef}
-          displacementScale={77}
-          blurAmount={0.03}
+          displacementScale={60}
+          blurAmount={0.06}
           saturation={160}
-          aberrationIntensity={1.5}
+          aberrationIntensity={2}
           elasticity={0.12}
           cornerRadius={32}
           padding="32px 36px"
