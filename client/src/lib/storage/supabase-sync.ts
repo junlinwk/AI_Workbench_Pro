@@ -48,10 +48,11 @@ export function startSyncEngine(userId: string): void {
 
   initialPull(userId)
     .then(async () => {
-      console.log("[SyncEngine] Initial pull complete — clearing stale queue")
-      // Clear stale queue entries that predate the pull (they would overwrite merged data)
+      console.log("[SyncEngine] Initial pull complete — draining pending writes before clearing queue")
+      // Drain pending writes FIRST so local changes aren't lost, THEN clear stale entries
+      await drainSyncQueue(userId)
       await syncQueueClear()
-      console.log("[SyncEngine] Stale queue cleared, subscribing to realtime")
+      console.log("[SyncEngine] Queue drained and cleared, subscribing to realtime")
       subscribeRealtime(userId)
     })
     .catch((err) => {

@@ -401,6 +401,7 @@ export default function LoginPage() {
       <div style={{ position: "relative", width: "100%", height: "100%", zIndex: 10 }}>
         <LiquidGlass
           style={{
+            position: "absolute",
             width: "calc(100% - 32px)",
             maxWidth: 460,
           }}

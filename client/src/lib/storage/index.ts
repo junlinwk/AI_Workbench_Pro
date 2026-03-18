@@ -289,6 +289,21 @@ export async function initStorage(userId: string): Promise<void> {
     // Sync engine not available — continue with local only
   }
 
+  // Step 4: Flush pending cache to localStorage on page close to prevent data loss
+  // (IDB writes are async and may not complete before unload)
+  window.addEventListener("beforeunload", () => {
+    for (const [key, value] of cache.entries()) {
+      try {
+        const sepIdx = key.indexOf(":")
+        if (sepIdx === -1) continue
+        const uid = key.slice(0, sepIdx)
+        const ns = key.slice(sepIdx + 1)
+        const lsKey = `ai-wb-${ns}-${uid}`
+        localStorage.setItem(lsKey, JSON.stringify(value))
+      } catch { }
+    }
+  })
+
   initialized = true
 }
 
