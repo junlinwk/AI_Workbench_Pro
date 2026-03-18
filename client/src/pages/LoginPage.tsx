@@ -360,15 +360,11 @@ export default function LoginPage() {
       style={{
         position: "fixed",
         inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "column",
         overflow: "hidden",
         background: "oklch(0.05 0.012 265)",
       }}
     >
-      {/* Hyperspeed Three.js road background — fixed full viewport */}
+      {/* Hyperspeed Three.js road background */}
       <Suspense fallback={null}>
         <div
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
@@ -400,19 +396,18 @@ export default function LoginPage() {
         {lang === "zh-TW" ? "EN" : "\u4e2d\u6587"}
       </button>
 
-      {/* Card — Liquid Glass */}
-      <LiquidGlass
-        style={{
-          position: "relative",
-          zIndex: 10,
-          width: "100%",
-          maxWidth: 460,
-          margin: "0 16px",
-          borderRadius: 24,
-        }}
-        padding="32px 36px"
-      >
-        <div>
+      {/* LiquidGlass positions itself via top:50% left:50% translate(-50%,-50%)
+          so we just need a full-size relative container for it to center within */}
+      <div style={{ position: "relative", width: "100%", height: "100%", zIndex: 10 }}>
+        <LiquidGlass
+          style={{
+            width: "calc(100% - 32px)",
+            maxWidth: 460,
+          }}
+          padding="32px 36px"
+          cornerRadius={24}
+        >
+          <div>
         {/* Logo — uses unified /logos/app-logo.png */}
         <div className="flex flex-col items-center mb-6">
           <img
@@ -792,13 +787,17 @@ export default function LoginPage() {
         )}
         </div>
       </LiquidGlass>
+      </div>
 
-      {/* Footer */}
+      {/* Footer — positioned at bottom center */}
       <p
         style={{
-          marginTop: 16,
+          position: "absolute",
+          bottom: 24,
+          left: 0,
+          right: 0,
+          textAlign: "center",
           fontSize: "0.75rem",
-          position: "relative",
           zIndex: 10,
           color: "oklch(0.35 0 0)",
         }}

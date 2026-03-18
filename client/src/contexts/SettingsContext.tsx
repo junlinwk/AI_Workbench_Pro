@@ -10,6 +10,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from "react"
 import {
   loadUserData,
@@ -470,6 +471,10 @@ export function SettingsProvider({
     return () => clearInterval(interval)
   }, [userId])
 
+  // Guard: when true, the next settings change came from remote — skip persisting
+  // back to Supabase (which would cause a ping-pong loop between devices).
+  const skipPersistRef = useRef(false)
+
   // Listen for remote settings changes (from other devices via Realtime)
   useEffect(() => {
     function handleRemoteUpdate(e: Event) {
@@ -480,6 +485,7 @@ export function SettingsProvider({
         remote.apiKeys && typeof remote.apiKeys === "object"
           ? deobfuscateKeys(remote.apiKeys)
           : {}
+      skipPersistRef.current = true
       setSettings((prev) => ({
         ...prev,
         ...remote,
@@ -490,8 +496,12 @@ export function SettingsProvider({
     return () => window.removeEventListener("storage-remote-update", handleRemoteUpdate)
   }, [])
 
-  // Persist
+  // Persist — but skip if the change came from a remote update
   useEffect(() => {
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false
+      return
+    }
     persistSettings(settings, userId)
   }, [settings, userId])
 
