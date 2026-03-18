@@ -5,8 +5,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "build:vercel": "vite build",
+    "build": "npm run build:liquid-glass && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build:vercel": "npm run build:liquid-glass && vite build",
+    "build:liquid-glass": "cd liquid-glass-react-master && npm install --ignore-scripts && npm run build",
     "start": "NODE_ENV=production node dist/index.js",
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
