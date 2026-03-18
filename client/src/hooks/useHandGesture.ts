@@ -3,6 +3,10 @@
  *
  * Lazy-loads @mediapipe/tasks-vision only when enabled.
  * Uses low-res camera (320×240) at ~15fps to minimize CPU usage.
+ *
+ * Supports Document Picture-in-Picture: call popOutPiP() to move the camera
+ * preview into a floating always-on-top mini window. The recognition loop
+ * continues unthrottled because the PiP window is always "visible".
  */
 import { useState, useRef, useEffect, useCallback } from "react"
 import {
@@ -34,18 +38,23 @@ export interface UseHandGestureReturn {
   modelLoadError: string | null
   handLandmarks: NormalizedLandmark[] | null
   cameraActive: boolean
+  isPiP: boolean
+  pipSupported: boolean
+  popOutPiP: () => Promise<void>
+  popInPiP: () => void
 }
 
 export function useHandGesture(
   options: UseHandGestureOptions,
 ): UseHandGestureReturn {
-  const { enabled, onGrabStart, onPushSend, onThrowDiscard, onRelease, fps = 15 } = options
+  const { enabled, onGrabStart, onPushSend, onThrowDiscard, onRelease, fps = 30 } = options
 
   const [gestureState, setGestureState] = useState<GestureState>("IDLE")
   const [isModelLoading, setIsModelLoading] = useState(false)
   const [modelLoadError, setModelLoadError] = useState<string | null>(null)
   const [handLandmarks, setHandLandmarks] = useState<NormalizedLandmark[] | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
+  const [isPiP, setIsPiP] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const recognizerRef = useRef<any>(null)
@@ -53,16 +62,32 @@ export function useHandGesture(
   const machineCtxRef = useRef(createMachineContext())
   const streamRef = useRef<MediaStream | null>(null)
   const lastProcessTime = useRef(0)
+  const pipWindowRef = useRef<Window | null>(null)
+  const pipVideoRef = useRef<HTMLVideoElement | null>(null)
+  const stateRef = useRef<GestureState>("IDLE")
 
   // Keep callbacks in refs to avoid re-creating effects
   const callbacksRef = useRef({ onGrabStart, onPushSend, onThrowDiscard, onRelease })
   callbacksRef.current = { onGrabStart, onPushSend, onThrowDiscard, onRelease }
+
+  const pipSupported =
+    typeof window !== "undefined" && "documentPictureInPicture" in window
+
+  const closePiPWindow = useCallback(() => {
+    if (pipWindowRef.current && !pipWindowRef.current.closed) {
+      pipWindowRef.current.close()
+    }
+    pipWindowRef.current = null
+    pipVideoRef.current = null
+    setIsPiP(false)
+  }, [])
 
   const cleanup = useCallback(() => {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = 0
     }
+    closePiPWindow()
     if (recognizerRef.current) {
       recognizerRef.current.close()
       recognizerRef.current = null
@@ -75,7 +100,24 @@ export function useHandGesture(
     setGestureState("IDLE")
     setHandLandmarks(null)
     machineCtxRef.current = createMachineContext()
-  }, [])
+  }, [closePiPWindow])
+
+  // Sync stateRef for PiP overlay updates
+  useEffect(() => {
+    stateRef.current = gestureState
+    updatePiPOverlay()
+  }, [gestureState])
+
+  function updatePiPOverlay() {
+    const pipWin = pipWindowRef.current
+    if (!pipWin || pipWin.closed) return
+    const badge = pipWin.document.getElementById("pip-state")
+    if (badge) {
+      const state = stateRef.current
+      badge.textContent = state
+      badge.dataset.state = state
+    }
+  }
 
   useEffect(() => {
     if (!enabled) {
@@ -157,7 +199,8 @@ export function useHandGesture(
     }
 
     function processVideoFrame(timestamp: number) {
-      const video = videoRef.current
+      // Use PiP video if available, otherwise main video
+      const video = pipVideoRef.current || videoRef.current
       const recognizer = recognizerRef.current
       if (!video || !recognizer || video.readyState < 2) return
 
@@ -237,6 +280,110 @@ export function useHandGesture(
     }
   }, [enabled, fps, cleanup])
 
+  /**
+   * Pop the camera preview into a Document Picture-in-Picture window.
+   * The window stays on top even when the main tab is in background,
+   * keeping the camera stream and RAF loop running without throttling.
+   */
+  const popOutPiP = useCallback(async () => {
+    if (!pipSupported || !streamRef.current) return
+
+    try {
+      const docPiP = (window as any).documentPictureInPicture
+      const pipWin: Window = await docPiP.requestWindow({
+        width: 180,
+        height: 200,
+      })
+      pipWindowRef.current = pipWin
+
+      // Inject styles into PiP document
+      const style = pipWin.document.createElement("style")
+      style.textContent = `
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          background: #0a0a0f;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          gap: 6px;
+          font-family: system-ui, sans-serif;
+          overflow: hidden;
+          user-select: none;
+        }
+        video {
+          width: 160px;
+          height: 120px;
+          border-radius: 10px;
+          object-fit: cover;
+          transform: scaleX(-1);
+          border: 2px solid rgba(255,255,255,0.15);
+        }
+        #pip-state {
+          padding: 3px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          color: #fff;
+          background: #52525b;
+          transition: background 0.2s;
+        }
+        #pip-state[data-state="HAND_OPEN"]    { background: #3b82f6; }
+        #pip-state[data-state="FIST_GRABBED"]  { background: #8b5cf6; }
+        #pip-state[data-state="PUSH_SEND"]     { background: #22c55e; }
+        #pip-state[data-state="THROW_DISCARD"] { background: #ef4444; }
+        #pip-hint {
+          font-size: 9px;
+          color: rgba(255,255,255,0.3);
+          text-align: center;
+          line-height: 1.3;
+        }
+      `
+      pipWin.document.head.appendChild(style)
+
+      // Create video element in PiP
+      const pipVideo = pipWin.document.createElement("video")
+      pipVideo.autoplay = true
+      pipVideo.playsInline = true
+      pipVideo.muted = true
+      pipVideo.srcObject = streamRef.current
+      pipWin.document.body.appendChild(pipVideo)
+
+      // State badge
+      const badge = pipWin.document.createElement("div")
+      badge.id = "pip-state"
+      badge.textContent = stateRef.current
+      badge.dataset.state = stateRef.current
+      pipWin.document.body.appendChild(badge)
+
+      // Hint text
+      const hint = pipWin.document.createElement("div")
+      hint.id = "pip-hint"
+      hint.innerHTML = "✋ Palm → ✊ Fist = REC<br>Push fwd = Send / Pull back = Discard"
+      pipWin.document.body.appendChild(hint)
+
+      await pipVideo.play()
+      pipVideoRef.current = pipVideo
+      setIsPiP(true)
+
+      // Listen for PiP window close
+      pipWin.addEventListener("pagehide", () => {
+        pipVideoRef.current = null
+        pipWindowRef.current = null
+        setIsPiP(false)
+      })
+    } catch (err: any) {
+      console.warn("Document PiP failed:", err)
+    }
+  }, [pipSupported])
+
+  const popInPiP = useCallback(() => {
+    closePiPWindow()
+  }, [closePiPWindow])
+
   return {
     gestureState,
     videoRef,
@@ -244,5 +391,9 @@ export function useHandGesture(
     modelLoadError,
     handLandmarks,
     cameraActive,
+    isPiP,
+    pipSupported,
+    popOutPiP,
+    popInPiP,
   }
 }

@@ -1749,6 +1749,10 @@ export default function ChatInterface({
     modelLoadError: gestureModelError,
     handLandmarks: _handLandmarks,
     cameraActive: gestureCameraActive,
+    isPiP: gestureIsPiP,
+    pipSupported: gesturePiPSupported,
+    popOutPiP: gesturePopOut,
+    popInPiP: gesturePopIn,
   } = useHandGesture({
     enabled: handGestureMode,
     onGrabStart: startRecording,
@@ -2161,6 +2165,10 @@ export default function ChatInterface({
               audioLevel={audioLevel}
               cameraActive={gestureCameraActive}
               lang={lang}
+              isPiP={gestureIsPiP}
+              pipSupported={gesturePiPSupported}
+              onPopOut={gesturePopOut}
+              onPopIn={gesturePopIn}
             />
           </div>
         )}

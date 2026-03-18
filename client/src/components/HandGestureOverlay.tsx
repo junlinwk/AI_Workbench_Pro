@@ -1,11 +1,14 @@
 /**
  * HandGestureOverlay — Camera preview + gesture state indicator
  *
- * Shows a small mirrored camera preview (120×90) in the bottom-right of the chat area,
+ * Shows a small mirrored camera preview (120×90) in the chat area,
  * with visual state badges and directional hints during FIST_GRABBED state.
+ *
+ * Supports popping out into a floating Document PiP window that stays
+ * on top and keeps detecting even when the main tab is in background.
  */
 import { cn } from "@/lib/utils"
-import { Loader2 } from "lucide-react"
+import { Loader2, ExternalLink, Minimize2 } from "lucide-react"
 import type { GestureState } from "@/lib/gestureStateMachine"
 
 interface HandGestureOverlayProps {
@@ -16,6 +19,10 @@ interface HandGestureOverlayProps {
   audioLevel: number
   cameraActive: boolean
   lang: "zh-TW" | "en"
+  isPiP: boolean
+  pipSupported: boolean
+  onPopOut: () => void
+  onPopIn: () => void
 }
 
 const STATE_CONFIG: Record<
@@ -35,8 +42,8 @@ const STATE_CONFIG: Record<
   },
   FIST_GRABBED: {
     border: "border-violet-400/60",
-    label_zh: "前推發送 ↑ / 右甩捨棄 →",
-    label_en: "Push to send ↑ / Swipe right to discard →",
+    label_zh: "前推發送 ↑ / 往後丟捨棄 ↓",
+    label_en: "Push fwd to send / Pull back to discard",
     glow: "shadow-violet-500/30",
   },
   PUSH_SEND: {
@@ -61,38 +68,95 @@ export function HandGestureOverlay({
   audioLevel,
   cameraActive,
   lang,
+  isPiP,
+  pipSupported,
+  onPopOut,
+  onPopIn,
 }: HandGestureOverlayProps) {
   const config = STATE_CONFIG[gestureState]
   const label = lang === "en" ? config.label_en : config.label_zh
 
+  // When in PiP mode, show a minimal indicator instead of the full preview
+  if (isPiP) {
+    return (
+      <div className="flex items-center gap-2">
+        <div
+          className={cn(
+            "px-2 py-1 rounded-lg text-[10px] backdrop-blur-sm transition-all duration-300",
+            gestureState === "FIST_GRABBED"
+              ? "bg-violet-500/20 text-violet-300"
+              : gestureState === "PUSH_SEND"
+                ? "bg-emerald-500/20 text-emerald-300 animate-pulse"
+                : gestureState === "THROW_DISCARD"
+                  ? "bg-red-500/20 text-red-300 animate-pulse"
+                  : gestureState === "HAND_OPEN"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-white/5 text-white/40",
+          )}
+        >
+          {lang === "en" ? "Gesture PiP active" : "手勢懸浮窗啟用中"}
+          <span className="ml-1.5 font-mono">{gestureState}</span>
+        </div>
+        <button
+          onClick={onPopIn}
+          className="p-1 rounded-md text-white/30 hover:text-white/60 hover:bg-white/8 transition-colors"
+          title={lang === "en" ? "Close PiP window" : "關閉懸浮窗"}
+        >
+          <Minimize2 size={12} />
+        </button>
+        {/* Hidden video — keeps ref alive for when PiP closes */}
+        <video
+          ref={videoRef}
+          className="hidden"
+          autoPlay
+          playsInline
+          muted
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {/* State badge */}
-      <div
-        className={cn(
-          "px-2 py-0.5 rounded-lg text-[10px] backdrop-blur-sm transition-all duration-300",
-          gestureState === "FIST_GRABBED"
-            ? "bg-violet-500/20 text-violet-300"
-            : gestureState === "PUSH_SEND"
-              ? "bg-emerald-500/20 text-emerald-300 animate-pulse"
-              : gestureState === "THROW_DISCARD"
-                ? "bg-red-500/20 text-red-300 animate-pulse"
-                : gestureState === "HAND_OPEN"
-                  ? "bg-blue-500/20 text-blue-300"
-                  : "bg-white/5 text-white/40",
-        )}
-      >
-        {isModelLoading ? (
-          <span className="flex items-center gap-1">
-            <Loader2 size={10} className="animate-spin" />
-            {lang === "en" ? "Loading model..." : "載入模型中..."}
-          </span>
-        ) : modelLoadError ? (
-          <span className="text-red-400">
-            {lang === "en" ? "Error: " : "錯誤："}{modelLoadError}
-          </span>
-        ) : (
-          label
+      {/* State badge + PiP button */}
+      <div className="flex items-center gap-1.5">
+        <div
+          className={cn(
+            "px-2 py-0.5 rounded-lg text-[10px] backdrop-blur-sm transition-all duration-300",
+            gestureState === "FIST_GRABBED"
+              ? "bg-violet-500/20 text-violet-300"
+              : gestureState === "PUSH_SEND"
+                ? "bg-emerald-500/20 text-emerald-300 animate-pulse"
+                : gestureState === "THROW_DISCARD"
+                  ? "bg-red-500/20 text-red-300 animate-pulse"
+                  : gestureState === "HAND_OPEN"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-white/5 text-white/40",
+          )}
+        >
+          {isModelLoading ? (
+            <span className="flex items-center gap-1">
+              <Loader2 size={10} className="animate-spin" />
+              {lang === "en" ? "Loading model..." : "載入模型中..."}
+            </span>
+          ) : modelLoadError ? (
+            <span className="text-red-400">
+              {lang === "en" ? "Error: " : "錯誤："}{modelLoadError}
+            </span>
+          ) : (
+            label
+          )}
+        </div>
+
+        {/* Pop-out to PiP button */}
+        {pipSupported && cameraActive && (
+          <button
+            onClick={onPopOut}
+            className="p-1 rounded-md text-white/30 hover:text-white/60 hover:bg-white/8 transition-colors"
+            title={lang === "en" ? "Pop out to floating window" : "彈出懸浮窗"}
+          >
+            <ExternalLink size={12} />
+          </button>
         )}
       </div>
 

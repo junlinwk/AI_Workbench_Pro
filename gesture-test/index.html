@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gesture Tuning Test Harness</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0a0f;--surface:rgba(255,255,255,0.04);--border:rgba(255,255,255,0.08);
+    --text:#e4e4e7;--muted:#71717a;--accent-blue:#3b82f6;--accent-violet:#8b5cf6;
+    --accent-green:#22c55e;--accent-red:#ef4444;--accent-gray:#52525b;--accent-amber:#f59e0b;
+    --font-mono:'JetBrains Mono',ui-monospace,monospace;
+    --font-sans:Inter,system-ui,sans-serif;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--font-sans);min-height:100vh;padding:16px}
+  h1{font-size:1.25rem;font-weight:600;margin-bottom:12px;background:linear-gradient(135deg,var(--accent-blue),var(--accent-violet));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .layout{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto 1fr;gap:12px;max-width:1400px;margin:0 auto}
+  .camera-section{grid-row:1/3}
+  .data-panel{grid-column:2;grid-row:1}
+  .log-section{grid-column:2;grid-row:2}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;backdrop-filter:blur(12px)}
+  .params-section{margin-top:12px}
+
+  /* Camera */
+  .camera-wrap{position:relative;width:640px;height:480px;border-radius:12px;overflow:hidden;background:#000}
+  .camera-wrap video,.camera-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+  .camera-wrap video{transform:scaleX(-1)}
+  .camera-wrap canvas{transform:scaleX(-1);pointer-events:none}
+
+  /* State badge */
+  .state-badge{display:inline-block;padding:4px 14px;border-radius:999px;font-family:var(--font-mono);font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .state-IDLE{background:var(--accent-gray);color:#fff}
+  .state-HAND_OPEN{background:var(--accent-blue);color:#fff}
+  .state-FIST_GRABBED{background:var(--accent-violet);color:#fff}
+  .state-PUSH_SEND{background:var(--accent-green);color:#fff}
+  .state-THROW_DISCARD{background:var(--accent-red);color:#fff}
+
+  /* Data grid */
+  .data-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .data-item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:.82rem}
+  .data-item .label{color:var(--muted);font-family:var(--font-mono)}
+  .data-item .value{font-family:var(--font-mono);font-weight:600;color:var(--accent-blue)}
+
+  /* Sliders */
+  .param-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:.82rem}
+  .param-row label{width:200px;color:var(--muted);font-family:var(--font-mono);flex-shrink:0}
+  .param-row input[type=range]{flex:1;accent-color:var(--accent-violet);height:4px}
+  .param-row .param-val{width:60px;text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--accent-violet)}
+
+  /* Event log */
+  .log-list{height:220px;overflow-y:auto;font-family:var(--font-mono);font-size:.75rem;line-height:1.6}
+  .log-list::-webkit-scrollbar{width:4px}
+  .log-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+  .log-entry{padding:2px 6px;border-radius:4px}
+  .log-entry:nth-child(odd){background:rgba(255,255,255,0.02)}
+  .log-entry .ts{color:var(--muted)}
+  .log-entry .action{font-weight:700}
+  .log-action-GRAB_START{color:var(--accent-violet)}
+  .log-action-PUSH_SEND{color:var(--accent-green)}
+  .log-action-THROW_DISCARD{color:var(--accent-red)}
+  .log-action-RELEASE{color:var(--accent-gray)}
+  .log-state{color:var(--accent-blue)}
+
+  /* Grab debug */
+  .grab-debug{margin-top:10px;padding:10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:8px;font-family:var(--font-mono);font-size:.8rem;display:none}
+  .grab-debug.visible{display:block}
+  .grab-debug .ratio-bar{height:6px;background:rgba(255,255,255,0.1);border-radius:3px;margin-top:6px;overflow:hidden;position:relative}
+  .grab-debug .ratio-fill{height:100%;border-radius:3px;transition:width .15s;position:absolute;top:0;left:0}
+  .grab-debug .ratio-marker{position:absolute;top:-2px;width:2px;height:10px;background:#fff;opacity:0.5}
+
+  /* Grace bar */
+  .grace-indicator{margin-top:8px;font-size:.75rem;color:var(--muted)}
+  .grace-bar-wrap{height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:4px;overflow:hidden}
+  .grace-bar-fill{height:100%;border-radius:2px;transition:width .1s;background:var(--accent-amber)}
+
+  /* Start button */
+  .start-btn{display:block;margin:12px auto;padding:10px 32px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--accent-blue),var(--accent-violet));color:#fff;font-size:.9rem;font-weight:600;cursor:pointer;font-family:var(--font-sans)}
+  .start-btn:hover{opacity:.9}
+  .start-btn:disabled{opacity:.4;cursor:not-allowed}
+
+  .status-msg{text-align:center;color:var(--muted);font-size:.85rem;margin-top:8px}
+
+  @media(max-width:1100px){
+    .layout{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+    .camera-section{grid-row:auto}
+    .data-panel{grid-column:1}
+    .log-section{grid-column:1}
+    .camera-wrap{width:100%;height:auto;aspect-ratio:4/3}
+  }
+</style>
+</head>
+<body>
+
+<h1>Gesture Tuning Test Harness</h1>
+
+<div class="layout">
+  <!-- Left: Camera -->
+  <div class="camera-section">
+    <div class="panel">
+      <div class="camera-wrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <button class="start-btn" id="startBtn">Start Camera &amp; Model</button>
+      <div class="status-msg" id="statusMsg"></div>
+    </div>
+
+    <!-- Tunable parameters -->
+    <div class="panel params-section">
+      <h2 style="font-size:.9rem;margin-bottom:10px;color:var(--muted)">Tunable Parameters</h2>
+      <div class="param-row">
+        <label>OPEN_PALM_THRESHOLD</label>
+        <input type="range" id="p_openPalm" min="1" max="10" step="1" value="3" />
+        <span class="param-val" id="v_openPalm">3</span>
+      </div>
+      <div class="param-row">
+        <label>HAND_OPEN_GRACE</label>
+        <input type="range" id="p_handOpenGrace" min="0" max="10" step="1" value="4" />
+        <span class="param-val" id="v_handOpenGrace">4</span>
+      </div>
+      <div class="param-row">
+        <label>FIST_GRACE</label>
+        <input type="range" id="p_fistGrace" min="0" max="15" step="1" value="5" />
+        <span class="param-val" id="v_fistGrace">5</span>
+      </div>
+      <div class="param-row">
+        <label>PUSH_AREA_RATIO</label>
+        <input type="range" id="p_pushArea" min="1.0" max="2.0" step="0.05" value="1.25" />
+        <span class="param-val" id="v_pushArea">1.25</span>
+      </div>
+      <div class="param-row">
+        <label>THROW_BACK_RATIO</label>
+        <input type="range" id="p_throwBack" min="0.3" max="0.9" step="0.05" value="0.65" />
+        <span class="param-val" id="v_throwBack">0.65</span>
+      </div>
+      <div class="param-row">
+        <label>FPS</label>
+        <input type="range" id="p_fps" min="5" max="30" step="1" value="15" />
+        <span class="param-val" id="v_fps">15</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right top: Real-time data -->
+  <div class="panel data-panel">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <span style="color:var(--muted);font-size:.8rem">State:</span>
+      <span class="state-badge state-IDLE" id="stateBadge">IDLE</span>
+      <span style="margin-left:auto;color:var(--muted);font-size:.8rem">Action:</span>
+      <span id="lastAction" style="font-family:var(--font-mono);font-weight:600;font-size:.85rem;color:var(--accent-violet)">--</span>
+    </div>
+    <div class="data-grid">
+      <div class="data-item"><span class="label">Gesture</span><span class="value" id="d_gesture">--</span></div>
+      <div class="data-item"><span class="label">Confidence</span><span class="value" id="d_confidence">--</span></div>
+      <div class="data-item"><span class="label">handCenterX</span><span class="value" id="d_cx">--</span></div>
+      <div class="data-item"><span class="label">handCenterY</span><span class="value" id="d_cy">--</span></div>
+      <div class="data-item"><span class="label">boundingBoxArea</span><span class="value" id="d_area">--</span></div>
+      <div class="data-item"><span class="label">FPS (actual)</span><span class="value" id="d_fps">--</span></div>
+      <div class="data-item"><span class="label">Grace frames</span><span class="value" id="d_grace">0</span></div>
+      <div class="data-item"><span class="label">Push ready</span><span class="value" id="d_pushReady">--</span></div>
+      <div class="data-item"><span class="label">Throw ready</span><span class="value" id="d_throwReady">--</span></div>
+    </div>
+
+    <!-- Grace frames visual indicator -->
+    <div class="grace-indicator" id="graceSection">
+      Grace: <span id="graceLabel">0 / --</span>
+      <div class="grace-bar-wrap"><div class="grace-bar-fill" id="graceBar" style="width:0"></div></div>
+    </div>
+
+    <!-- Grab baseline debug -->
+    <div class="grab-debug" id="grabDebug">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+        <span>Baseline: <strong id="gd_baseline">--</strong></span>
+        <span>Current: <strong id="gd_current">--</strong></span>
+        <span>Ratio: <strong id="gd_ratio">--</strong></span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px;font-size:.7rem;color:var(--muted)">
+        <span style="color:var(--accent-red)">&#9664; Throw back</span>
+        <span style="flex:1"></span>
+        <span style="color:var(--accent-green)">Push fwd &#9654;</span>
+      </div>
+      <div class="ratio-bar">
+        <div class="ratio-fill" id="gd_bar" style="width:0;background:var(--accent-violet)"></div>
+        <div class="ratio-marker" id="gd_throwMarker" title="THROW_BACK_RATIO"></div>
+        <div class="ratio-marker" id="gd_pushMarker" title="PUSH_AREA_RATIO"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right bottom: Event log -->
+  <div class="panel log-section">
+    <h2 style="font-size:.9rem;margin-bottom:8px;color:var(--muted)">Event Log</h2>
+    <div class="log-list" id="logList"></div>
+  </div>
+</div>
+
+<script type="module">
+import { FilesetResolver, GestureRecognizer }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs";
+
+// ──────────────── DOM refs ────────────────
+const video = document.getElementById("video");
+const overlayCanvas = document.getElementById("overlay");
+const overlayCtx = overlayCanvas.getContext("2d");
+const startBtn = document.getElementById("startBtn");
+const statusMsg = document.getElementById("statusMsg");
+const stateBadge = document.getElementById("stateBadge");
+const lastActionEl = document.getElementById("lastAction");
+const logList = document.getElementById("logList");
+const grabDebug = document.getElementById("grabDebug");
+
+const d = {
+  gesture: document.getElementById("d_gesture"),
+  confidence: document.getElementById("d_confidence"),
+  cx: document.getElementById("d_cx"),
+  cy: document.getElementById("d_cy"),
+  area: document.getElementById("d_area"),
+  fps: document.getElementById("d_fps"),
+  grace: document.getElementById("d_grace"),
+  pushReady: document.getElementById("d_pushReady"),
+  throwReady: document.getElementById("d_throwReady"),
+};
+const gd = {
+  baseline: document.getElementById("gd_baseline"),
+  current: document.getElementById("gd_current"),
+  ratio: document.getElementById("gd_ratio"),
+  bar: document.getElementById("gd_bar"),
+  throwMarker: document.getElementById("gd_throwMarker"),
+  pushMarker: document.getElementById("gd_pushMarker"),
+};
+const graceLabel = document.getElementById("graceLabel");
+const graceBar = document.getElementById("graceBar");
+
+// ──────────────── Tunable params ────────────────
+const params = {
+  OPEN_PALM_THRESHOLD: 3,
+  HAND_OPEN_GRACE: 4,
+  FIST_GRACE: 5,
+  PUSH_AREA_RATIO: 1.25,
+  THROW_BACK_RATIO: 0.65,
+  FPS: 15,
+};
+
+function bindSlider(id, valId, key, fmt) {
+  const slider = document.getElementById(id);
+  const valEl = document.getElementById(valId);
+  slider.addEventListener("input", () => {
+    const v = parseFloat(slider.value);
+    params[key] = v;
+    valEl.textContent = fmt ? fmt(v) : v;
+  });
+}
+bindSlider("p_openPalm", "v_openPalm", "OPEN_PALM_THRESHOLD");
+bindSlider("p_handOpenGrace", "v_handOpenGrace", "HAND_OPEN_GRACE");
+bindSlider("p_fistGrace", "v_fistGrace", "FIST_GRACE");
+bindSlider("p_pushArea", "v_pushArea", "PUSH_AREA_RATIO", v => v.toFixed(2));
+bindSlider("p_throwBack", "v_throwBack", "THROW_BACK_RATIO", v => v.toFixed(2));
+bindSlider("p_fps", "v_fps", "FPS");
+
+// ──────────────── State Machine (mirrors gestureStateMachine.ts) ────────────────
+const RECENT_FRAMES_MAX = 12;
+
+function createMachineContext() {
+  return {
+    state: "IDLE",
+    openPalmFrames: 0,
+    graceFrames: 0,
+    grabBaseline: null,
+    pushReady: false,
+    throwReady: false,
+    recentFrames: [],
+  };
+}
+
+function processFrame(ctx, frame) {
+  const recentFrames = [...ctx.recentFrames, frame].slice(-RECENT_FRAMES_MAX);
+  let next = { ...ctx, recentFrames };
+  let action = null;
+  const gesture = frame.gesture;
+
+  switch (ctx.state) {
+    case "IDLE":
+      if (gesture === "Open_Palm") {
+        next.openPalmFrames = ctx.openPalmFrames + 1;
+        if (next.openPalmFrames >= params.OPEN_PALM_THRESHOLD) {
+          next.state = "HAND_OPEN";
+          next.graceFrames = 0;
+        }
+      } else {
+        if (ctx.openPalmFrames > 0 && gesture !== null) {
+          // Don't reset — just don't increment
+        } else {
+          next.openPalmFrames = 0;
+        }
+      }
+      break;
+
+    case "HAND_OPEN":
+      if (gesture === "Closed_Fist") {
+        next.state = "FIST_GRABBED";
+        next.grabBaseline = { boundingBoxArea: frame.boundingBoxArea };
+        next.openPalmFrames = 0;
+        next.graceFrames = 0;
+        next.pushReady = false;
+        next.throwReady = false;
+        action = "GRAB_START";
+      } else if (gesture === "Open_Palm") {
+        next.graceFrames = 0;
+      } else {
+        next.graceFrames = ctx.graceFrames + 1;
+        if (next.graceFrames > params.HAND_OPEN_GRACE) {
+          next.state = "IDLE";
+          next.openPalmFrames = 0;
+          next.graceFrames = 0;
+        }
+      }
+      break;
+
+    case "FIST_GRABBED":
+      // Track area changes vs baseline
+      if (ctx.grabBaseline) {
+        const areaRatio = frame.boundingBoxArea / ctx.grabBaseline.boundingBoxArea;
+        if (areaRatio > params.PUSH_AREA_RATIO) {
+          next.pushReady = true;
+        }
+        if (areaRatio < params.THROW_BACK_RATIO) {
+          next.throwReady = true;
+        }
+      }
+
+      // Forward push: area grew, then hand opens
+      if (next.pushReady && gesture !== "Closed_Fist") {
+        next.state = "PUSH_SEND";
+        action = "PUSH_SEND";
+        break;
+      }
+
+      // Throw back: area shrank, then hand opens/disappears
+      if (next.throwReady && gesture !== "Closed_Fist") {
+        next.state = "THROW_DISCARD";
+        action = "THROW_DISCARD";
+        break;
+      }
+
+      // Fist held — reset grace
+      if (gesture === "Closed_Fist") {
+        next.graceFrames = 0;
+      } else {
+        next.graceFrames = ctx.graceFrames + 1;
+        if (next.graceFrames > params.FIST_GRACE) {
+          next.state = "IDLE";
+          next.openPalmFrames = 0;
+          next.grabBaseline = null;
+          next.graceFrames = 0;
+          next.pushReady = false;
+          next.throwReady = false;
+          action = "RELEASE";
+        }
+      }
+      break;
+
+    case "PUSH_SEND":
+    case "THROW_DISCARD":
+      next.state = "IDLE";
+      next.openPalmFrames = 0;
+      next.grabBaseline = null;
+      next.graceFrames = 0;
+      next.pushReady = false;
+      next.throwReady = false;
+      next.recentFrames = [];
+      break;
+  }
+
+  return { ctx: next, action };
+}
+
+// ──────────────── Logging ────────────────
+function addLog(type, text) {
+  const el = document.createElement("div");
+  el.className = "log-entry";
+  const ts = new Date().toLocaleTimeString("en-US", { hour12: false, fractionalSecondDigits: 1 });
+  if (type === "action") {
+    el.innerHTML = `<span class="ts">${ts}</span> <span class="action log-action-${text}">[ACTION] ${text}</span>`;
+  } else {
+    el.innerHTML = `<span class="ts">${ts}</span> <span class="log-state">[STATE] ${text}</span>`;
+  }
+  logList.appendChild(el);
+  while (logList.children.length > 200) logList.removeChild(logList.firstChild);
+  logList.scrollTop = logList.scrollHeight;
+}
+
+// ──────────────── FPS counter ────────────────
+let frameTimestamps = [];
+function measureFps() {
+  const now = performance.now();
+  frameTimestamps.push(now);
+  frameTimestamps = frameTimestamps.filter(t => now - t < 1000);
+  return frameTimestamps.length;
+}
+
+// ──────────────── Landmark drawing ────────────────
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],
+];
+
+function drawLandmarks(landmarks, w, h) {
+  overlayCtx.clearRect(0, 0, w, h);
+  if (!landmarks || landmarks.length === 0) return;
+
+  overlayCtx.strokeStyle = "rgba(139, 92, 246, 0.6)";
+  overlayCtx.lineWidth = 2;
+  for (const [i, j] of HAND_CONNECTIONS) {
+    const a = landmarks[i], b = landmarks[j];
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(a.x * w, a.y * h);
+    overlayCtx.lineTo(b.x * w, b.y * h);
+    overlayCtx.stroke();
+  }
+
+  for (const lm of landmarks) {
+    overlayCtx.beginPath();
+    overlayCtx.arc(lm.x * w, lm.y * h, 4, 0, Math.PI * 2);
+    overlayCtx.fillStyle = "rgba(59, 130, 246, 0.9)";
+    overlayCtx.fill();
+  }
+}
+
+// ──────────────── Main init ────────────────
+let recognizer = null;
+let machineCtx = createMachineContext();
+let running = false;
+let lastProcessTime = 0;
+let prevState = "IDLE";
+
+startBtn.addEventListener("click", async () => {
+  if (running) return;
+  startBtn.disabled = true;
+  statusMsg.textContent = "Loading MediaPipe model...";
+
+  try {
+    const fileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
+    );
+    statusMsg.textContent = "Creating gesture recognizer...";
+
+    recognizer = await GestureRecognizer.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 1,
+    });
+
+    statusMsg.textContent = "Starting camera...";
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: 640, height: 480 },
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    overlayCanvas.width = video.videoWidth || 640;
+    overlayCanvas.height = video.videoHeight || 480;
+
+    statusMsg.textContent = "Running";
+    statusMsg.style.color = "var(--accent-green)";
+    running = true;
+    requestAnimationFrame(loop);
+  } catch (err) {
+    statusMsg.textContent = "Error: " + err.message;
+    statusMsg.style.color = "var(--accent-red)";
+    startBtn.disabled = false;
+  }
+});
+
+function loop() {
+  if (!running) return;
+  const now = performance.now();
+  const frameInterval = 1000 / params.FPS;
+  if (now - lastProcessTime >= frameInterval) {
+    lastProcessTime = now;
+    processVideoFrame(now);
+  }
+  requestAnimationFrame(loop);
+}
+
+function processVideoFrame(timestamp) {
+  if (!video || !recognizer || video.readyState < 2) return;
+
+  let result;
+  try {
+    result = recognizer.recognizeForVideo(video, timestamp);
+  } catch {
+    return;
+  }
+
+  const gestureName = result.gestures?.[0]?.[0]?.categoryName ?? null;
+  const confidence = result.gestures?.[0]?.[0]?.score ?? null;
+  const landmarks = result.landmarks?.[0] ?? null;
+
+  const w = overlayCanvas.width;
+  const h = overlayCanvas.height;
+  drawLandmarks(landmarks, w, h);
+
+  let handCenterX = 0.5, handCenterY = 0.5, boundingBoxArea = 0;
+
+  if (landmarks && landmarks.length > 0) {
+    let minX = 1, maxX = 0, minY = 1, maxY = 0, sumX = 0, sumY = 0;
+    for (const lm of landmarks) {
+      sumX += lm.x; sumY += lm.y;
+      if (lm.x < minX) minX = lm.x;
+      if (lm.x > maxX) maxX = lm.x;
+      if (lm.y < minY) minY = lm.y;
+      if (lm.y > maxY) maxY = lm.y;
+    }
+    handCenterX = sumX / landmarks.length;
+    handCenterY = sumY / landmarks.length;
+    boundingBoxArea = (maxX - minX) * (maxY - minY);
+  }
+
+  const frame = { gesture: gestureName, handCenterX, handCenterY, boundingBoxArea, timestamp };
+  const { ctx: newCtx, action } = processFrame(machineCtx, frame);
+  machineCtx = newCtx;
+
+  // Update UI
+  const fps = measureFps();
+  d.gesture.textContent = gestureName || "None";
+  d.confidence.textContent = confidence !== null ? (confidence * 100).toFixed(1) + "%" : "--";
+  d.cx.textContent = handCenterX.toFixed(3);
+  d.cy.textContent = handCenterY.toFixed(3);
+  d.area.textContent = boundingBoxArea.toFixed(5);
+  d.fps.textContent = fps;
+  d.grace.textContent = newCtx.graceFrames;
+  d.pushReady.textContent = newCtx.pushReady ? "YES" : "--";
+  d.pushReady.style.color = newCtx.pushReady ? "var(--accent-green)" : "var(--accent-blue)";
+  d.throwReady.textContent = newCtx.throwReady ? "YES" : "--";
+  d.throwReady.style.color = newCtx.throwReady ? "var(--accent-red)" : "var(--accent-blue)";
+
+  // Grace bar
+  let graceMax = 0;
+  if (newCtx.state === "HAND_OPEN") graceMax = params.HAND_OPEN_GRACE;
+  else if (newCtx.state === "FIST_GRABBED") graceMax = params.FIST_GRACE;
+
+  if (graceMax > 0) {
+    graceLabel.textContent = `${newCtx.graceFrames} / ${graceMax}`;
+    const pct = Math.min(100, (newCtx.graceFrames / graceMax) * 100);
+    graceBar.style.width = pct + "%";
+    graceBar.style.background = pct > 70 ? "var(--accent-red)" : "var(--accent-amber)";
+  } else {
+    graceLabel.textContent = "0 / --";
+    graceBar.style.width = "0";
+  }
+
+  // State badge
+  if (newCtx.state !== prevState) {
+    addLog("state", prevState + " -> " + newCtx.state);
+    prevState = newCtx.state;
+  }
+  stateBadge.textContent = newCtx.state;
+  stateBadge.className = "state-badge state-" + newCtx.state;
+
+  // Action
+  if (action) {
+    lastActionEl.textContent = action;
+    addLog("action", action);
+    lastActionEl.style.transition = "none";
+    lastActionEl.style.opacity = "1";
+    setTimeout(() => {
+      lastActionEl.style.transition = "opacity 2s";
+      lastActionEl.style.opacity = "0.4";
+    }, 50);
+  }
+
+  // Grab debug panel — dual-direction area ratio bar
+  if (newCtx.state === "FIST_GRABBED" && newCtx.grabBaseline) {
+    grabDebug.classList.add("visible");
+    const baseline = newCtx.grabBaseline.boundingBoxArea;
+    const ratio = boundingBoxArea / baseline;
+    gd.baseline.textContent = baseline.toFixed(5);
+    gd.current.textContent = boundingBoxArea.toFixed(5);
+    gd.ratio.textContent = ratio.toFixed(3) + "x";
+
+    // Bar: map ratio 0.3 - 2.0 onto 0% - 100%, with 1.0 (baseline) at ~41%
+    const barMin = 0.3, barMax = 2.0;
+    const pct = Math.min(100, Math.max(0, ((ratio - barMin) / (barMax - barMin)) * 100));
+    gd.bar.style.width = pct + "%";
+
+    // Color based on zone
+    if (ratio < params.THROW_BACK_RATIO) {
+      gd.bar.style.background = "var(--accent-red)";
+    } else if (ratio > params.PUSH_AREA_RATIO) {
+      gd.bar.style.background = "var(--accent-green)";
+    } else {
+      gd.bar.style.background = "var(--accent-violet)";
+    }
+
+    // Position threshold markers
+    const throwPct = ((params.THROW_BACK_RATIO - barMin) / (barMax - barMin)) * 100;
+    const pushPct = ((params.PUSH_AREA_RATIO - barMin) / (barMax - barMin)) * 100;
+    gd.throwMarker.style.left = throwPct + "%";
+    gd.pushMarker.style.left = pushPct + "%";
+  } else {
+    grabDebug.classList.remove("visible");
+  }
+}
+</script>
+</body>
+</html>

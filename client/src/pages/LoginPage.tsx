@@ -15,6 +15,45 @@ import LiquidGlass from "liquid-glass-react"
 const Hyperspeed = lazy(() => import("@/components/Hyperspeed"))
 
 // ---------------------------------------------------------------------------
+//  Hyperspeed Three.js road effect options (module-level to avoid re-renders)
+// ---------------------------------------------------------------------------
+const HYPERSPEED_OPTIONS = {
+  distortion: "turbulentDistortion" as const,
+  length: 400,
+  roadWidth: 10,
+  islandWidth: 2,
+  lanesPerRoad: 3,
+  fov: 90,
+  fovSpeedUp: 150,
+  speedUp: 2,
+  carLightsFade: 0.4,
+  totalSideLightSticks: 20,
+  lightPairsPerRoadWay: 40,
+  shoulderLinesWidthPercentage: 0.05,
+  brokenLinesWidthPercentage: 0.1,
+  brokenLinesLengthPercentage: 0.5,
+  lightStickWidth: [0.12, 0.5] as [number, number],
+  lightStickHeight: [1.3, 1.7] as [number, number],
+  movingAwaySpeed: [60, 80] as [number, number],
+  movingCloserSpeed: [-120, -160] as [number, number],
+  carLightsLength: [400 * 0.03, 400 * 0.2] as [number, number],
+  carLightsRadius: [0.05, 0.14] as [number, number],
+  carWidthPercentage: [0.3, 0.5] as [number, number],
+  carShiftX: [-0.8, 0.8] as [number, number],
+  carFloorSeparation: [0, 5] as [number, number],
+  colors: {
+    roadColor: 0x080808,
+    islandColor: 0x0a0a0a,
+    background: 0x000000,
+    shoulderLines: 0x131318,
+    brokenLines: 0x131318,
+    leftCars: [0xd856bf, 0x6750a2, 0xc247ac],
+    rightCars: [0x03b3c3, 0x0e5ea5, 0x324555],
+    sticks: 0x03b3c3,
+  },
+}
+
+// ---------------------------------------------------------------------------
 //  Disposable / temporary email domain blocklist
 // ---------------------------------------------------------------------------
 const DISPOSABLE_DOMAINS = new Set([
@@ -320,9 +359,11 @@ export default function LoginPage() {
       className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden"
       style={{ background: "oklch(0.05 0.012 265)" }}
     >
-      {/* Hyperspeed star-field background */}
+      {/* Hyperspeed Three.js road background */}
       <Suspense fallback={null}>
-        <Hyperspeed starCount={600} speed={1.5} />
+        <div className="absolute inset-0 w-full h-full pointer-events-none">
+          <Hyperspeed effectOptions={HYPERSPEED_OPTIONS} />
+        </div>
       </Suspense>
 
       {/* Subtle gradient overlay */}
@@ -330,8 +371,8 @@ export default function LoginPage() {
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage: `
-            radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.22 255 / 4%) 0%, transparent 60%),
-            radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.25 290 / 3%) 0%, transparent 60%)
+            radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.22 255 / 3%) 0%, transparent 60%),
+            radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.25 290 / 2%) 0%, transparent 60%)
           `,
         }}
       />
