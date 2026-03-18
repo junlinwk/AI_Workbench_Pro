@@ -11,8 +11,9 @@ const ALLOWED_PREFIXES = [
   "https://openrouter.ai/",
 ]
 
+// Headers to strip — NOTE: "http-referer" is NOT blocked (OpenRouter needs it)
 const BLOCKED = new Set([
-  "host", "cookie", "set-cookie", "origin", "referer",
+  "host", "cookie", "set-cookie", "origin",
   "x-forwarded-for", "x-real-ip",
 ])
 
@@ -29,12 +30,6 @@ function validateUrl(raw: string): URL | null {
     if (u.username || u.password) return null
     return u
   } catch { return null }
-}
-
-function getIp(headers: Record<string, any>): string {
-  const f = headers["x-forwarded-for"]
-  if (typeof f === "string") return f.split(",")[0]?.trim() || "unknown"
-  return "unknown"
 }
 
 // ─── Handler ────────────────────────────────────────────────────────────
@@ -73,31 +68,28 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 9000)
-
     const apiRes = await fetch(parsed.href, {
       method: "POST",
       headers: safeHeaders,
       body: typeof body === "string" ? body : JSON.stringify(body),
-      signal: controller.signal,
     })
-
-    clearTimeout(timeout)
 
     const responseText = await apiRes.text()
 
     res.status(apiRes.status)
     const ct = apiRes.headers.get("content-type")
     if (ct) res.setHeader("content-type", ct)
+    const retryAfter = apiRes.headers.get("retry-after")
+    if (retryAfter) res.setHeader("retry-after", retryAfter)
 
     return res.send(responseText)
   } catch (err: any) {
-    if (err?.name === "AbortError") {
-      return res.status(504).json({ error: "AI API request timed out" })
-    }
+    console.error("[ai/chat] Proxy error:", err?.message || err)
     if (!res.headersSent) {
-      return res.status(502).json({ error: "AI API request failed" })
+      return res.status(502).json({
+        error: "AI API request failed",
+        detail: err?.message || "Unknown error",
+      })
     }
   }
 }

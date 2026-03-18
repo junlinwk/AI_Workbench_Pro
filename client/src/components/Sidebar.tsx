@@ -8,7 +8,7 @@ import {
   Search, Plus, ChevronDown, ChevronRight, MessageSquare,
   Folder, FolderOpen, Star, Clock, Settings,
   User, LogOut, MoreHorizontal, PanelLeftClose, PanelLeft,
-  Cpu, Trash2, Pin, PinOff, Edit3, Inbox, FolderPlus,
+  Trash2, Pin, PinOff, Edit3, Inbox, FolderPlus,
   ArrowRight, Lock, Unlock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -1101,11 +1101,11 @@ export default function Sidebar({
       const target =
         lockDialog.type === "chat"
           ? flattenFolders(folders)
-              .flatMap((f) => f.chats)
-              .find((c) => c.id === lockDialog.id)
+            .flatMap((f) => f.chats)
+            .find((c) => c.id === lockDialog.id)
           : flattenFolders(folders).find(
-              (f) => f.id === lockDialog.id,
-            );
+            (f) => f.id === lockDialog.id,
+          );
 
       if (target?.lockHash === hash) {
         if (lockDialog.type === "chat") {
@@ -1141,11 +1141,11 @@ export default function Sidebar({
       const target =
         lockDialog.type === "chat"
           ? flattenFolders(folders)
-              .flatMap((f) => f.chats)
-              .find((c) => c.id === lockDialog.id)
+            .flatMap((f) => f.chats)
+            .find((c) => c.id === lockDialog.id)
           : flattenFolders(folders).find(
-              (f) => f.id === lockDialog.id,
-            );
+            (f) => f.id === lockDialog.id,
+          );
 
       if (target?.lockHash === hash) {
         setUnlockedIds(
@@ -1176,16 +1176,12 @@ export default function Sidebar({
       )}>
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
-              <Cpu size={14} className="text-white" />
-            </div>
+            <img src="/logos/app-logo.svg" alt="" width={28} height={28} className="rounded-lg" />
             <span className="font-semibold text-sm text-white/90 tracking-tight">AI Workbench</span>
           </div>
         )}
         {collapsed && (
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
-            <Cpu size={14} className="text-white" />
-          </div>
+          <img src="/logos/app-logo.svg" alt="" width={28} height={28} className="rounded-lg" />
         )}
         <Button
           variant="ghost"
