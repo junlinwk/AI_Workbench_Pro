@@ -201,7 +201,7 @@ const GlassContainer = forwardRef<
           style={{
             borderRadius: `${cornerRadius}px`,
             position: "relative",
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
             gap: "24px",
             padding,
