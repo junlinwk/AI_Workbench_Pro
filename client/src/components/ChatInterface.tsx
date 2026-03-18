@@ -1022,6 +1022,7 @@ export default function ChatInterface({
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const handleSendRef = useRef<(() => void) | null>(null)
+  const discardRecordingRef = useRef(false)
 
   // Check for pending background responses on mount (from tab switches)
   useEffect(() => {
@@ -1228,6 +1229,12 @@ export default function ChatInterface({
                 ? "No Groq API key set for voice. Add one in Settings."
                 : "尚未設定 Groq API Key，請在設定中新增。",
             )
+            setLiveTranscript("")
+            return
+          }
+          // If recording was discarded (gesture throw-back), skip transcription result
+          if (discardRecordingRef.current) {
+            discardRecordingRef.current = false
             setLiveTranscript("")
             return
           }
@@ -1761,6 +1768,7 @@ export default function ChatInterface({
       setTimeout(() => handleSendRef.current?.(), 1500)
     },
     onThrowDiscard: () => {
+      discardRecordingRef.current = true
       stopRecording()
       setInput("")
       setLiveTranscript("")
@@ -2151,7 +2159,19 @@ export default function ChatInterface({
 
         {/* Hand gesture mode: camera preview + gesture overlay */}
         {handGestureMode && (
-          <div className="rounded-2xl border border-violet-500/30 bg-violet-900/10 backdrop-blur-sm shadow-lg shadow-violet-900/20 p-4 flex flex-col items-center gap-3 select-none">
+          <div className="relative rounded-2xl border border-violet-500/30 bg-violet-900/10 backdrop-blur-sm shadow-lg shadow-violet-900/20 p-4 flex flex-col items-center gap-3 select-none">
+            {/* Close button */}
+            <button
+              onClick={() => {
+                setHandGestureMode(false)
+                stopRecording()
+                setLiveTranscript("")
+              }}
+              className="absolute top-2 right-2 p-1 rounded-md text-white/30 hover:text-white/70 hover:bg-white/10 transition-colors z-10"
+              title={lang === "en" ? "Close gesture mode" : "關閉手勢模式"}
+            >
+              <X size={14} />
+            </button>
             {liveTranscript && (
               <div className="px-4 py-2 rounded-xl bg-black/40 text-white/80 text-sm max-w-full truncate">
                 {liveTranscript}

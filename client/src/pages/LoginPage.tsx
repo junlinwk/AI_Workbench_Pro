@@ -356,33 +356,25 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden"
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden"
       style={{ background: "oklch(0.05 0.012 265)" }}
     >
-      {/* Hyperspeed Three.js road background */}
+      {/* Hyperspeed Three.js road background — fixed full viewport */}
       <Suspense fallback={null}>
-        <div className="absolute inset-0 w-full h-full pointer-events-none">
+        <div
+          className="pointer-events-none"
+          style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh" }}
+        >
           <Hyperspeed effectOptions={HYPERSPEED_OPTIONS} />
         </div>
       </Suspense>
-
-      {/* Subtle gradient overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage: `
-            radial-gradient(ellipse 80% 50% at 20% 0%, oklch(0.62 0.22 255 / 3%) 0%, transparent 60%),
-            radial-gradient(ellipse 60% 40% at 80% 100%, oklch(0.55 0.25 290 / 2%) 0%, transparent 60%)
-          `,
-        }}
-      />
 
       {/* Language toggle */}
       <button
         onClick={() =>
           setLang(lang === "zh-TW" ? "en" : "zh-TW")
         }
-        className="absolute top-6 right-6 z-10 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+        className="absolute top-6 right-6 z-20 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
         style={{
           background: "oklch(1 0 0 / 5%)",
           border: "1px solid oklch(1 0 0 / 10%)",
@@ -392,9 +384,13 @@ export default function LoginPage() {
         {lang === "zh-TW" ? "EN" : "\u4e2d\u6587"}
       </button>
 
-      {/* Card — Liquid Glass */}
-      <LiquidGlass className="relative z-10 w-full max-w-md mx-4 rounded-3xl p-6 sm:p-8">
-        <div>
+      {/* Card — Liquid Glass wraps the entire form card */}
+      <LiquidGlass
+        className="relative z-10 w-full max-w-md mx-4 rounded-3xl"
+        style={{ padding: 0 }}
+        padding="0px"
+      >
+        <div className="p-6 sm:p-8">
         {/* Logo — uses unified /logos/app-logo.png */}
         <div className="flex flex-col items-center mb-6">
           <img
@@ -777,19 +773,11 @@ export default function LoginPage() {
 
       {/* Footer */}
       <p
-        className="mt-8 text-xs relative z-10"
+        className="mt-4 text-xs relative z-10"
         style={{ color: "oklch(0.35 0 0)" }}
       >
         {t.footer}
       </p>
-
-      {/* Pulse animation keyframe */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 0.5; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.05); }
-        }
-      `}</style>
     </div>
   )
 }
