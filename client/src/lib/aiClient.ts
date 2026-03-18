@@ -150,12 +150,12 @@ export async function callAI(
 
   let res: Response
   try {
-    // Use proxy on localhost always, and on production for CORS-blocked providers (OpenRouter)
-    const useProxy =
+    // Use proxy for CORS-blocked providers; direct for others
+    const needsProxy =
       window.location.hostname === "localhost" ||
       model.providerId === "openrouter"
 
-    if (useProxy) {
+    if (needsProxy) {
       res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -163,12 +163,23 @@ export async function callAI(
         signal,
       })
     } else {
-      res = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal,
-      })
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal,
+        })
+      } catch (directErr) {
+        // CORS or network error on direct call — fallback to proxy
+        console.warn("[aiClient] Direct call failed, retrying via proxy:", directErr)
+        res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint, headers, body }),
+          signal,
+        })
+      }
     }
   } catch (err) {
     if (err instanceof TypeError) {
