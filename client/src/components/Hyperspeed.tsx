@@ -58,8 +58,8 @@ interface HyperspeedProps {
 }
 
 const defaultOptions: HyperspeedOptions = {
-  onSpeedUp: () => {},
-  onSlowDown: () => {},
+  onSpeedUp: () => { },
+  onSlowDown: () => { },
   distortion: 'turbulentDistortion',
   length: 400,
   roadWidth: 10,
@@ -150,11 +150,11 @@ const distortions: Distortions = {
       const uAmp = mountainUniforms.uAmp.value;
       const distortion = new THREE.Vector3(
         Math.cos(progress * Math.PI * uFreq.x + time) * uAmp.x -
-          Math.cos(movementProgressFix * Math.PI * uFreq.x + time) * uAmp.x,
+        Math.cos(movementProgressFix * Math.PI * uFreq.x + time) * uAmp.x,
         nsin(progress * Math.PI * uFreq.y + time) * uAmp.y -
-          nsin(movementProgressFix * Math.PI * uFreq.y + time) * uAmp.y,
+        nsin(movementProgressFix * Math.PI * uFreq.y + time) * uAmp.y,
         nsin(progress * Math.PI * uFreq.z + time) * uAmp.z -
-          nsin(movementProgressFix * Math.PI * uFreq.z + time) * uAmp.z
+        nsin(movementProgressFix * Math.PI * uFreq.z + time) * uAmp.z
       );
       const lookAtAmp = new THREE.Vector3(2, 2, 2);
       const lookAtOffset = new THREE.Vector3(0, 0, -5);
@@ -182,9 +182,9 @@ const distortions: Distortions = {
       const uAmp = xyUniforms.uAmp.value;
       const distortion = new THREE.Vector3(
         Math.cos(progress * Math.PI * uFreq.x + time) * uAmp.x -
-          Math.cos(movementProgressFix * Math.PI * uFreq.x + time) * uAmp.x,
+        Math.cos(movementProgressFix * Math.PI * uFreq.x + time) * uAmp.x,
         Math.sin(progress * Math.PI * uFreq.y + time + Math.PI / 2) * uAmp.y -
-          Math.sin(movementProgressFix * Math.PI * uFreq.y + time + Math.PI / 2) * uAmp.y,
+        Math.sin(movementProgressFix * Math.PI * uFreq.y + time + Math.PI / 2) * uAmp.y,
         0
       );
       const lookAtAmp = new THREE.Vector3(2, 0.4, 1);
@@ -213,9 +213,9 @@ const distortions: Distortions = {
       const uAmp = LongRaceUniforms.uAmp.value;
       const distortion = new THREE.Vector3(
         Math.sin(progress * Math.PI * uFreq.x + time) * uAmp.x -
-          Math.sin(camProgress * Math.PI * uFreq.x + time) * uAmp.x,
+        Math.sin(camProgress * Math.PI * uFreq.x + time) * uAmp.x,
         Math.sin(progress * Math.PI * uFreq.y + time) * uAmp.y -
-          Math.sin(camProgress * Math.PI * uFreq.y + time) * uAmp.y,
+        Math.sin(camProgress * Math.PI * uFreq.y + time) * uAmp.y,
         0
       );
       const lookAtAmp = new THREE.Vector3(1, 1, 0);
@@ -958,8 +958,15 @@ class App {
     this.renderer.setSize(initW, initH, false);
     this.renderer.setPixelRatio(window.devicePixelRatio);
 
+    // Ensure canvas fills its container so clientWidth/clientHeight track
+    // the actual container size — fixes initial sizing & backdrop-filter.
+    const cvs = this.renderer.domElement;
+    cvs.style.width = '100%';
+    cvs.style.height = '100%';
+    cvs.style.display = 'block';
+
     this.composer = new EffectComposer(this.renderer);
-    container.appendChild(this.renderer.domElement);
+    container.appendChild(cvs);
 
     this.camera = new THREE.PerspectiveCamera(options.fov, initW / initH, 0.1, 10000);
     this.camera.position.z = -5;
