@@ -4,8 +4,6 @@
 
 **A production-ready, multi-provider AI chat platform with glassmorphism UI**
 
-**可部署的多模型 AI 對話平台，搭載玻璃擬態介面設計**
-
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white)](https://vite.dev/)
