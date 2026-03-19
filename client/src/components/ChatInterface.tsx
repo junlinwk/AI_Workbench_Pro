@@ -147,7 +147,6 @@ function MessageBubble({
   lang,
   conversationId,
   effectiveUserId,
-  groqApiKey,
   voiceLanguage = "auto",
 }: {
   message: Message
@@ -159,7 +158,6 @@ function MessageBubble({
   lang: "zh-TW" | "en"
   conversationId?: string
   effectiveUserId: string
-  groqApiKey?: string
   voiceLanguage?: "auto" | "zh" | "en"
 }) {
   const [copied, setCopied] = useState(false)
@@ -184,7 +182,7 @@ function MessageBubble({
     }
     setIsSpeaking(true)
     try {
-      await textToSpeech(message.content, groqApiKey, voiceLanguage)
+      await textToSpeech(message.content, undefined, voiceLanguage)
     } catch {
       // silent fail
     } finally {
@@ -673,40 +671,38 @@ function extractAndDispatchCodeBlocks(
 ) {
   const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
   let match
-  let dispatched = false
+  const pending: { code: string; language: string; source: string; filename?: string }[] = []
   while ((match = codeBlockRegex.exec(content)) !== null) {
     const language = match[1] || "text"
     const code = match[2].trim()
     // Only dispatch substantial code blocks (not short inline examples)
     if (code.length > 50 && code.split("\n").length > 3) {
-      window.dispatchEvent(
-        new CustomEvent("artifact-update", {
-          detail: { code, language, source },
-        }),
-      )
-      dispatched = true
+      pending.push({ code, language, source })
     }
   }
   // Detect markdown tables in the response (outside code blocks)
   const contentWithoutCode = content.replace(/```[\s\S]*?```/g, '')
   const hasTable = /\|[^\n]+\|\n\|[-:\s|]+\|/m.test(contentWithoutCode)
   if (hasTable) {
-    // Extract the table(s)
     const tableMatch = contentWithoutCode.match(/(\|[^\n]+\|\n\|[-:\s|]+\|\n(?:\|[^\n]+\|\n?)*)/gm)
     if (tableMatch) {
       for (const table of tableMatch) {
-        window.dispatchEvent(
-          new CustomEvent("artifact-update", {
-            detail: { code: table.trim(), language: "markdown", source, filename: "table.md" },
-          }),
-        )
-        dispatched = true
+        pending.push({ code: table.trim(), language: "markdown", source, filename: "table.md" })
       }
     }
   }
 
-  if (dispatched) {
+  if (pending.length > 0) {
+    // Open the Artifacts panel first so it mounts before receiving events
     window.dispatchEvent(new CustomEvent("artifacts-open"))
+    // Delay artifact-update dispatch to allow React to render/mount the panel
+    setTimeout(() => {
+      for (const item of pending) {
+        window.dispatchEvent(
+          new CustomEvent("artifact-update", { detail: item }),
+        )
+      }
+    }, 100)
   }
 }
 
@@ -926,7 +922,7 @@ export default function ChatInterface({
   userId: userIdProp,
   folderPrompt,
 }: ChatInterfaceProps) {
-  const { settings, hasApiKey, getApiKey } = useSettings()
+  const { settings, hasApiKey } = useSettings()
   const { user } = useAuth()
   const lang = settings.language
 
@@ -1160,12 +1156,9 @@ export default function ChatInterface({
   const currentProvider = currentModel
     ? MODEL_PROVIDERS.find((p) => p.id === currentModel.providerId)
     : null
-  const apiKey = currentModel
-    ? getApiKey(currentModel.providerId)
-    : undefined
   const canSend = hasApiKey(currentModel?.providerId || "")
-  // Groq API key for voice features (STT/TTS)
-  const groqApiKey = getApiKey("groq") || getApiKey("meta")
+  // Whether Groq/Meta key is available for voice features (STT/TTS)
+  const hasGroqKey = hasApiKey("groq") || hasApiKey("meta")
 
   const handleChipClick = useCallback((text: string) => {
     setInput(text)
@@ -1221,8 +1214,8 @@ export default function ChatInterface({
         setLiveTranscript(lang === "en" ? "Transcribing..." : "轉錄中...")
         try {
           let text = ""
-          if (groqApiKey) {
-            text = await transcribeAudio(blob, groqApiKey, settings.voiceLanguage)
+          if (hasGroqKey) {
+            text = await transcribeAudio(blob, undefined, settings.voiceLanguage)
           } else if (hasSpeechRecognition()) {
             text = await browserTranscribe()
           } else {
@@ -1262,7 +1255,7 @@ export default function ChatInterface({
           : "麥克風存取被拒絕",
       )
     }
-  }, [groqApiKey, lang, stopAudioMonitor])
+  }, [hasGroqKey, lang, stopAudioMonitor])
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
@@ -1346,7 +1339,7 @@ export default function ChatInterface({
     const currentImage = pendingImage
     setPendingImage(null)
 
-    if (!canSend || !apiKey) {
+    if (!canSend) {
       toast.error(
         lang === "en"
           ? `Please set your ${currentProvider?.name || "model"} API key in Settings > Models & API.`
@@ -1508,7 +1501,7 @@ export default function ChatInterface({
           const classifyResult = await callAI(
             [{ role: "user", content: `Does this user message need real-time web information to answer properly? Answer only "yes" or "no".\n\nMessage: "${trimmed}"` }],
             settings.selectedModelId,
-            apiKey!,
+            undefined,
             0,
             10,
             "Output only yes or no.",
@@ -1527,7 +1520,7 @@ export default function ChatInterface({
         const searchQueries = await callAI(
           [{ role: "user", content: searchQueryPrompt }],
           settings.selectedModelId,
-          apiKey,
+          undefined,
           0.3,
           100,
           "Output only search queries, one per line. No numbering, no quotes, no explanation.",
@@ -1633,7 +1626,7 @@ export default function ChatInterface({
       const aiPromise = callAI(
         chatHistory,
         settings.selectedModelId,
-        apiKey,
+        undefined,
         effectiveTemperature,
         settings.maxTokens,
         fullSystemPrompt,
@@ -1672,8 +1665,8 @@ export default function ChatInterface({
       extractAndDispatchCodeBlocks(response)
 
       // Voice/gesture mode: speak the response aloud
-      if ((voiceMode || handGestureMode) && groqApiKey) {
-        textToSpeech(response.slice(0, 2000), groqApiKey, settings.voiceLanguage)
+      if ((voiceMode || handGestureMode) && hasGroqKey) {
+        textToSpeech(response.slice(0, 2000), undefined, settings.voiceLanguage)
           .then(() => {
             if (voiceMode) startRecording()
           })
@@ -1687,7 +1680,7 @@ export default function ChatInterface({
         aiMsg,
         userMsg,
         settings.selectedModelId,
-        apiKey,
+        undefined,
         callAI,
         activeBranchId,
       ).catch(() => {})
@@ -1699,7 +1692,7 @@ export default function ChatInterface({
           const title = await callAI(
             [{ role: "user", content: titlePrompt }],
             settings.selectedModelId,
-            apiKey,
+            undefined,
             0,
             30,
             "Output only a short title. No quotes. No explanation.",
@@ -1810,7 +1803,7 @@ export default function ChatInterface({
     }
     setIsTyping(true)
 
-    if (!canSend || !apiKey) {
+    if (!canSend) {
       setTimeout(() => {
         setIsTyping(false)
         toast.error(
@@ -1911,7 +1904,7 @@ export default function ChatInterface({
       const response = await callAI(
         chatHistory,
         settings.selectedModelId,
-        apiKey,
+        undefined,
         regenTemperature,
         settings.maxTokens,
         fullSystemPrompt,
@@ -2119,7 +2112,6 @@ export default function ChatInterface({
                   lang={lang}
                   conversationId={conversationId}
                   effectiveUserId={effectiveUserId}
-                  groqApiKey={groqApiKey}
                   voiceLanguage={settings.voiceLanguage}
                 />
               </div>

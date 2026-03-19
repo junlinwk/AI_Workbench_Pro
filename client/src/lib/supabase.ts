@@ -32,3 +32,18 @@ export function getSupabase(): SupabaseClient | null {
 export function isSupabaseConfigured(): boolean {
   return !!(SUPABASE_URL && SUPABASE_ANON_KEY)
 }
+
+/**
+ * Get the current Supabase access token for authenticated API calls.
+ * Returns null if not logged in or Supabase is not configured.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+  try {
+    const { data } = await sb.auth.getSession()
+    return data.session?.access_token ?? null
+  } catch {
+    return null
+  }
+}

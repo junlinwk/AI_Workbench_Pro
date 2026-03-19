@@ -1,12 +1,14 @@
 /**
  * Shared AI client — multi-provider API call helper
  *
- * Extracted from ChatInterface so that other components (Notepad, TaskDAG, etc.)
- * can call AI models without duplicating provider-specific logic.
+ * Server-side key management: API keys are stored encrypted on the server.
+ * The client sends the Supabase auth token; the proxy fetches and injects
+ * the correct API key. The raw key NEVER appears in client code.
  *
  * Supports multimodal messages (text + image) via ContentPart arrays.
  */
 import { ALL_MODELS, MODEL_PROVIDERS } from "@/components/ModelSwitcher"
+import { getAuthToken } from "@/lib/supabase"
 
 /** Vision-capable models that accept image inputs */
 export const VISION_MODELS = new Set([
@@ -98,7 +100,7 @@ function getTextContent(content: MessageContent): string {
 export async function callAI(
   messages: ChatMessage[],
   modelId: string,
-  apiKey: string,
+  _apiKeyUnused: string | undefined, // kept for backward compat, ignored
   temperature: number,
   maxTokens: number,
   systemPrompt: string,
@@ -115,7 +117,6 @@ export async function callAI(
   }
 
   let endpoint: string
-  let headers: Record<string, string>
   let body: any
 
   switch (model.providerId) {
@@ -129,10 +130,6 @@ export async function callAI(
             ? "https://api.x.ai"
             : "https://api.openai.com"
       endpoint = `${baseUrl}/v1/chat/completions`
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
       const allMessages = [
         ...(systemPrompt
           ? [{ role: "system", content: systemPrompt }]
@@ -152,12 +149,6 @@ export async function callAI(
     }
     case "anthropic": {
       endpoint = "https://api.anthropic.com/v1/messages"
-      headers = {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      }
       const anthropicMessages = messages.map((m) => ({
         role: m.role,
         content: toAnthropicContent(m.content),
@@ -173,10 +164,6 @@ export async function callAI(
     }
     case "google": {
       endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`
-      headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      }
       body = {
         contents: messages.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
@@ -194,12 +181,7 @@ export async function callAI(
     }
     case "meta":
     case "groq": {
-      // Both route through Groq API
       endpoint = "https://api.groq.com/openai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
       const groqMessages = [
         ...(systemPrompt
           ? [{ role: "system", content: systemPrompt }]
@@ -219,10 +201,6 @@ export async function callAI(
     }
     case "mistral": {
       endpoint = "https://api.mistral.ai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
       const mistralMessages = [
         ...(systemPrompt
           ? [{ role: "system", content: systemPrompt }]
@@ -242,12 +220,6 @@ export async function callAI(
     }
     case "openrouter": {
       endpoint = "https://openrouter.ai/api/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": window.location.origin,
-        "X-OpenRouter-Title": "AI Workbench",
-      }
       const orMessages = [
         ...(systemPrompt
           ? [{ role: "system", content: systemPrompt }]
@@ -269,39 +241,27 @@ export async function callAI(
       throw new Error(`Unsupported provider: ${model.providerId}`)
   }
 
+  // Always route through the server proxy — keys are injected server-side
+  const authToken = await getAuthToken()
+  const proxyHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  }
+  if (authToken) {
+    proxyHeaders["Authorization"] = `Bearer ${authToken}`
+  }
+
   let res: Response
   try {
-    // Use proxy for CORS-blocked providers; direct for others
-    const needsProxy =
-      window.location.hostname === "localhost" ||
-      model.providerId === "openrouter"
-
-    if (needsProxy) {
-      res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint, headers, body }),
-        signal,
-      })
-    } else {
-      try {
-        res = await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal,
-        })
-      } catch (directErr) {
-        // CORS or network error on direct call — fallback to proxy
-        console.warn("[aiClient] Direct call failed, retrying via proxy:", directErr)
-        res = await fetch("/api/ai/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint, headers, body }),
-          signal,
-        })
-      }
-    }
+    res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: proxyHeaders,
+      body: JSON.stringify({
+        endpoint,
+        body,
+        provider: model.providerId,
+      }),
+      signal,
+    })
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error(
@@ -309,6 +269,14 @@ export async function callAI(
       )
     }
     throw err
+  }
+
+  if (res.status === 401) {
+    throw new Error("Authentication required — please log in and save your API key in Settings.")
+  }
+
+  if (res.status === 404) {
+    throw new Error("No API key found — please add your API key in Settings.")
   }
 
   if (res.status === 429) {

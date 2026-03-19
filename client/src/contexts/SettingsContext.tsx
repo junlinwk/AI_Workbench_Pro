@@ -2,7 +2,8 @@
  * SettingsContext — Global settings store
  *
  * Persistence layer: uses the storage facade (IndexedDB + Supabase sync).
- * API keys are obfuscated via the encryption module.
+ * API keys are stored SERVER-SIDE (encrypted AES-256-GCM in Supabase).
+ * The client only knows which providers have keys saved, never the key values.
  */
 import React, {
   createContext,
@@ -16,12 +17,7 @@ import {
   loadUserData,
   saveUserData,
 } from "@/lib/storage"
-import {
-  obfuscateKeys,
-  deobfuscateKeys,
-  setEncryptionUserId,
-} from "@/lib/storage/encryption"
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase"
+import { getSupabase, isSupabaseConfigured, getAuthToken } from "@/lib/supabase"
 
 export type ThemeMode = "dark" | "light" | "system"
 export type Language = "zh-TW" | "en"
@@ -43,6 +39,13 @@ export interface CustomModel {
   providerId: string
   endpoint: string
   contextWindow: string
+}
+
+/** Info about a saved key (returned by server — never includes the actual key) */
+export interface SavedKeyInfo {
+  provider: string
+  prefix: string
+  updatedAt: string
 }
 
 export interface Settings {
@@ -73,8 +76,9 @@ export interface Settings {
   // Model
   selectedModelId: string
 
-  // API Keys (stored obfuscated)
-  apiKeys: Record<string, string>
+  // API Keys — only tracks which providers have keys (actual keys are server-side)
+  apiKeys: Record<string, string> // kept for backward compat during migration; values are ignored
+  savedKeyProviders: string[] // provider IDs that have server-side keys
 
   // Custom Models
   customModels: CustomModel[]
@@ -121,6 +125,7 @@ const DEFAULT_SETTINGS: Settings = {
   webSearchEnabled: true,
   selectedModelId: "gpt-4o",
   apiKeys: {},
+  savedKeyProviders: [],
   customModels: [],
   membershipTier: "classic",
   saveHistory: true,
@@ -235,6 +240,63 @@ function validateSettings(raw: any): Partial<Settings> {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Server-side key management                                         */
+/* ------------------------------------------------------------------ */
+
+async function fetchKeyStatus(): Promise<SavedKeyInfo[]> {
+  try {
+    const authToken = await getAuthToken()
+    if (!authToken) return []
+    const res = await fetch("/api/keys/status", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.keys || []
+  } catch {
+    return []
+  }
+}
+
+async function saveKeyToServer(provider: string, key: string): Promise<{ success: boolean; prefix?: string }> {
+  try {
+    const authToken = await getAuthToken()
+    if (!authToken) return { success: false }
+    const res = await fetch("/api/keys/save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ provider, key }),
+    })
+    if (!res.ok) return { success: false }
+    const data = await res.json()
+    return { success: true, prefix: data.prefix }
+  } catch {
+    return { success: false }
+  }
+}
+
+async function deleteKeyFromServer(provider: string): Promise<boolean> {
+  try {
+    const authToken = await getAuthToken()
+    if (!authToken) return false
+    const res = await fetch("/api/keys/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ provider }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Context                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -246,10 +308,12 @@ interface SettingsContextType {
   ) => void
   updateSettings: (partial: Partial<Settings>) => void
   resetSettings: () => void
-  setApiKey: (provider: string, key: string) => void
-  removeApiKey: (provider: string) => void
+  setApiKey: (provider: string, key: string) => Promise<void>
+  removeApiKey: (provider: string) => Promise<void>
   getApiKey: (provider: string) => string | undefined
   hasApiKey: (provider: string) => boolean
+  savedKeys: SavedKeyInfo[]
+  refreshKeyStatus: () => Promise<void>
   addCustomModel: (model: CustomModel) => void
   removeCustomModel: (modelId: string) => void
   exportSettings: () => string
@@ -271,12 +335,7 @@ function loadSettings(userId?: string): Settings {
     null,
   )
   if (stored) {
-    // Deobfuscate API keys on load
-    const apiKeys =
-      stored.apiKeys && typeof stored.apiKeys === "object"
-        ? deobfuscateKeys(stored.apiKeys)
-        : {}
-    return { ...DEFAULT_SETTINGS, ...stored, apiKeys }
+    return { ...DEFAULT_SETTINGS, ...stored, apiKeys: {}, savedKeyProviders: stored.savedKeyProviders || [] }
   }
 
   // Legacy fallback: try reading from old localStorage key
@@ -289,11 +348,7 @@ function loadSettings(userId?: string): Settings {
       const raw = localStorage.getItem(key)
       if (raw) {
         const parsed = JSON.parse(raw)
-        const apiKeys =
-          parsed.apiKeys && typeof parsed.apiKeys === "object"
-            ? deobfuscateKeys(parsed.apiKeys)
-            : {}
-        return { ...DEFAULT_SETTINGS, ...parsed, apiKeys }
+        return { ...DEFAULT_SETTINGS, ...parsed, apiKeys: {}, savedKeyProviders: [] }
       }
     }
   } catch {}
@@ -304,14 +359,14 @@ function loadSettings(userId?: string): Settings {
 function persistSettings(settings: Settings, userId?: string) {
   if (!userId) return
 
-  // Obfuscate API keys before saving
+  // Never persist apiKeys to local storage (they live server-side now)
   const toSave = {
     ...settings,
-    apiKeys: obfuscateKeys(settings.apiKeys),
+    apiKeys: {},
   }
   saveUserData(userId, SETTINGS_NAMESPACE, toSave)
 
-  // Trigger immediate sync so settings (incl. API keys) get pushed to cloud ASAP
+  // Trigger sync for non-key settings
   import("@/lib/storage/supabase-sync")
     .then(({ triggerSync }) => triggerSync())
     .catch(() => {})
@@ -333,12 +388,7 @@ async function pullSettingsFromCloud(userId: string): Promise<Settings | null> {
     if (error || !data?.data) return null
 
     const remote = data.data as Settings
-    // Deobfuscate API keys from cloud
-    const apiKeys =
-      remote.apiKeys && typeof remote.apiKeys === "object"
-        ? deobfuscateKeys(remote.apiKeys)
-        : {}
-    return { ...DEFAULT_SETTINGS, ...remote, apiKeys }
+    return { ...DEFAULT_SETTINGS, ...remote, apiKeys: {}, savedKeyProviders: remote.savedKeyProviders || [] }
   } catch {
     return null
   }
@@ -386,6 +436,7 @@ export function SettingsProvider({
   const [settings, setSettings] = useState<Settings>(() =>
     loadSettings(userId),
   )
+  const [savedKeys, setSavedKeys] = useState<SavedKeyInfo[]>([])
 
   // Apply theme
   useEffect(() => {
@@ -422,27 +473,32 @@ export function SettingsProvider({
     root.style.fontSize = `${settings.fontSizePx}px`
   }, [settings.fontSize, settings.fontSizePx])
 
-  // Reload settings when userId changes + set encryption key + pull from cloud
+  // Fetch server-side key status
+  const refreshKeyStatus = useCallback(async () => {
+    const keys = await fetchKeyStatus()
+    setSavedKeys(keys)
+    setSettings((prev) => ({
+      ...prev,
+      savedKeyProviders: keys.map((k) => k.provider),
+    }))
+  }, [])
+
+  // Reload settings when userId changes + fetch key status + pull from cloud
   useEffect(() => {
-    setEncryptionUserId(userId ?? null)
     const local = loadSettings(userId)
     setSettings(local)
 
-    // Try to pull from cloud — if cloud has API keys but local doesn't, merge them in
     if (userId) {
+      // Fetch which providers have server-side keys
+      refreshKeyStatus()
+
+      // Pull non-key settings from cloud
       pullSettingsFromCloud(userId).then((cloud) => {
         if (!cloud) return
-        setSettings((prev) => {
-          const localHasKeys = Object.keys(prev.apiKeys).length > 0
-          const cloudHasKeys = Object.keys(cloud.apiKeys).length > 0
-          if (!localHasKeys && cloudHasKeys) {
-            return { ...prev, apiKeys: cloud.apiKeys }
-          }
-          return prev
-        })
+        setSettings((prev) => ({ ...prev, ...cloud, savedKeyProviders: prev.savedKeyProviders }))
       })
 
-      // Also pull membership tier from profiles table (admin may have changed it)
+      // Pull membership tier
       pullMembershipTier(userId).then((tier) => {
         if (tier) {
           setSettings((prev) => {
@@ -454,9 +510,9 @@ export function SettingsProvider({
         }
       })
     }
-  }, [userId])
+  }, [userId, refreshKeyStatus])
 
-  // Periodic membership tier check (picks up admin changes without refresh)
+  // Periodic membership tier check
   useEffect(() => {
     if (!userId) return
     const interval = setInterval(() => {
@@ -467,12 +523,11 @@ export function SettingsProvider({
           )
         }
       })
-    }, 30_000) // Check every 30 seconds
+    }, 30_000)
     return () => clearInterval(interval)
   }, [userId])
 
   // Guard: when true, the next settings change came from remote — skip persisting
-  // back to Supabase (which would cause a ping-pong loop between devices).
   const skipPersistRef = useRef(false)
 
   // Listen for remote settings changes (from other devices via Realtime)
@@ -481,15 +536,12 @@ export function SettingsProvider({
       const { namespace, data } = (e as CustomEvent).detail || {}
       if (namespace !== SETTINGS_NAMESPACE || !data) return
       const remote = data as Settings
-      const apiKeys =
-        remote.apiKeys && typeof remote.apiKeys === "object"
-          ? deobfuscateKeys(remote.apiKeys)
-          : {}
       skipPersistRef.current = true
       setSettings((prev) => ({
         ...prev,
         ...remote,
-        apiKeys: Object.keys(apiKeys).length > 0 ? apiKeys : prev.apiKeys,
+        apiKeys: {},
+        savedKeyProviders: prev.savedKeyProviders,
       }))
     }
     window.addEventListener("storage-remote-update", handleRemoteUpdate)
@@ -523,44 +575,54 @@ export function SettingsProvider({
     setSettings({ ...DEFAULT_SETTINGS })
   }, [])
 
+  // Save API key to server (encrypted)
   const setApiKey = useCallback(
-    (provider: string, key: string) => {
-      setSettings((prev) => ({
-        ...prev,
-        apiKeys: { ...prev.apiKeys, [provider]: key },
-      }))
+    async (provider: string, key: string) => {
+      const result = await saveKeyToServer(provider, key)
+      if (result.success) {
+        await refreshKeyStatus()
+      }
     },
-    [],
+    [refreshKeyStatus],
   )
 
-  const removeApiKey = useCallback((provider: string) => {
-    setSettings((prev) => {
-      const next = { ...prev.apiKeys }
-      delete next[provider]
-      return { ...prev, apiKeys: next }
-    })
-  }, [])
+  // Delete API key from server
+  const removeApiKey = useCallback(
+    async (provider: string) => {
+      const ok = await deleteKeyFromServer(provider)
+      if (ok) {
+        await refreshKeyStatus()
+      }
+    },
+    [refreshKeyStatus],
+  )
 
+  // getApiKey now returns undefined — keys are server-side only
+  // This is kept for backward compat; callers should use hasApiKey() instead.
   const getApiKey = useCallback(
-    (provider: string) => {
-      if (settings.apiKeys[provider]) return settings.apiKeys[provider]
-      // Groq and Meta share the same Groq API endpoint/key
-      if (provider === "groq") return settings.apiKeys["meta"]
-      if (provider === "meta") return settings.apiKeys["groq"]
+    (provider: string): string | undefined => {
+      // Return a placeholder so existing code that checks truthiness still works,
+      // but the actual key value is never available client-side.
+      const providers = savedKeys.map((k) => k.provider)
+      if (providers.includes(provider)) return "[server-stored]"
+      // Groq and Meta share the same key
+      if (provider === "groq" && providers.includes("meta")) return "[server-stored]"
+      if (provider === "meta" && providers.includes("groq")) return "[server-stored]"
       return undefined
     },
-    [settings.apiKeys],
+    [savedKeys],
   )
 
   const hasApiKey = useCallback(
     (provider: string) => {
-      if (settings.apiKeys[provider]) return true
-      // Groq and Meta share the same Groq API endpoint/key
-      if (provider === "groq") return !!settings.apiKeys["meta"]
-      if (provider === "meta") return !!settings.apiKeys["groq"]
+      const providers = savedKeys.map((k) => k.provider)
+      if (providers.includes(provider)) return true
+      // Groq and Meta share the same key
+      if (provider === "groq") return providers.includes("meta")
+      if (provider === "meta") return providers.includes("groq")
       return false
     },
-    [settings.apiKeys],
+    [savedKeys],
   )
 
   const addCustomModel = useCallback((model: CustomModel) => {
@@ -584,7 +646,7 @@ export function SettingsProvider({
 
   const exportSettings = useCallback(() => {
     // Never export API keys
-    const exportable = { ...settings, apiKeys: {} }
+    const exportable = { ...settings, apiKeys: {}, savedKeyProviders: [] }
     return JSON.stringify(exportable, null, 2)
   }, [settings])
 
@@ -593,11 +655,11 @@ export function SettingsProvider({
       const parsed = JSON.parse(json)
       const validated = validateSettings(parsed)
       if (Object.keys(validated).length === 0) return false
-      // Preserve existing API keys — never import them
       setSettings((prev) => ({
         ...prev,
         ...validated,
-        apiKeys: prev.apiKeys,
+        apiKeys: {},
+        savedKeyProviders: prev.savedKeyProviders,
       }))
       return true
     } catch {
@@ -616,6 +678,8 @@ export function SettingsProvider({
         removeApiKey,
         getApiKey,
         hasApiKey,
+        savedKeys,
+        refreshKeyStatus,
         addCustomModel,
         removeCustomModel,
         exportSettings,

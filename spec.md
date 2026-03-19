@@ -298,11 +298,11 @@ The core chat interface (`ChatInterface.tsx`) supports real-time AI conversation
 The shared `callAI()` function (`client/src/lib/aiClient.ts`) handles provider-specific API formatting:
 
 - OpenAI, DeepSeek, xAI, Meta (Groq), Mistral, OpenRouter use OpenAI-compatible chat completions format
-- Anthropic uses its native Messages API with `anthropic-dangerous-direct-browser-access` header
+- Anthropic uses its native Messages API
 - Google uses the Gemini `generateContent` endpoint with role mapping (`assistant` -> `model`)
-- **OpenRouter** always routes through `/api/ai/chat` server proxy (CORS blocked from browser)
-- **All other providers** call their APIs directly from the browser (faster, no timeout limit)
-- **Fallback**: if any direct call fails with a CORS error, the client auto-retries via the proxy
+- **All providers** route through the `/api/ai/chat` server proxy — API keys are injected server-side
+- The client sends a Supabase auth token; the proxy fetches the encrypted key from the database, decrypts it, and injects the correct auth header before forwarding to the AI provider
+- **Raw API keys never appear in client-side code, localStorage, or network requests**
 
 ### 3.2 Artifacts Panel
 
@@ -807,9 +807,9 @@ https://openrouter.ai/
 | Protection | Implementation |
 |-----------|----------------|
 | **Input sanitization** | `sanitizeText()` strips all HTML tags (`<script>`, `<style>`, `<iframe>`, `<embed>`, `<object>`, `<svg>`, etc.) and event handlers |
-| **API key encryption** | Two-tier: XOR obfuscation with device fingerprint (offline) + AES-256-GCM via Supabase Edge Function (online) |
+| **API key encryption** | Server-side AES-256-GCM encryption — keys stored in `user_api_keys` table, never sent to client |
 | **Per-user IndexedDB isolation** | Each user gets a separate IndexedDB database (`ai-wb-u-{userId}`) |
-| **API keys never leave browser** | Server proxy only forwards keys; never stores them |
+| **API keys never reach browser** | Keys stored server-side only; client receives a placeholder prefix (e.g. "sk-a…") for display |
 | **Settings export excludes keys** | `exportSettings()` explicitly clears `apiKeys: {}` |
 | **Settings import preserves keys** | `importSettings()` never overwrites existing API keys |
 | **Input length limits** | System prompt: 8192 chars, model ID: 128 chars, display name: 100 chars, bio: 500 chars, custom instructions: 2000 chars |
@@ -889,6 +889,9 @@ pnpm start
 |----------|----------|-------------|
 | `VITE_SUPABASE_URL` | For cloud features | Supabase project URL (`https://xxx.supabase.co`) |
 | `VITE_SUPABASE_ANON_KEY` | For cloud features | Supabase anonymous public key |
+| `SUPABASE_URL` | For API key storage | Supabase URL (server-side, same value as VITE_SUPABASE_URL) |
+| `SUPABASE_SERVICE_ROLE_KEY` | For API key storage | Supabase service role key (server-side only) |
+| `API_KEY_ENCRYPTION_SECRET` | For API key storage | 32-byte hex secret for AES-256-GCM encryption |
 | `VITE_GOOGLE_CLIENT_ID` | Optional | Legacy Google OAuth (not needed if using Supabase Google provider) |
 | `VITE_ADMIN_EMAIL` | Optional | Email address that gets admin privileges |
 | `VITE_OAUTH_PORTAL_URL` | Optional | OAuth portal URL |
@@ -954,17 +957,57 @@ Extracts readable text from a URL (SSRF-protected).
 
 #### `POST /api/ai/chat`
 
-AI API proxy. Forwards requests to whitelisted AI provider endpoints.
+AI API proxy with server-side key injection. Fetches encrypted API keys from the database.
 
 | Body Field | Type | Description |
 |------------|------|-------------|
 | `endpoint` | string | Target AI API URL (must be in whitelist) |
-| `headers` | object | Headers to forward (dangerous headers stripped) |
 | `body` | object | Request body to forward |
+| `provider` | string | Provider ID (e.g. "openai", "anthropic") — proxy fetches key from DB |
+| `headers` | object | (Legacy) Headers to forward — deprecated, use `provider` instead |
+
+**Auth:** `Authorization: Bearer <supabase-access-token>` required for `provider` mode.
 
 **Response:** Streamed response from the AI provider.
 
 **Rate limit:** 60 requests/minute/IP
+
+---
+
+#### `POST /api/keys/save`
+
+Store an encrypted API key server-side.
+
+| Body Field | Type | Description |
+|------------|------|-------------|
+| `provider` | string | Provider ID (openai, anthropic, google, etc.) |
+| `key` | string | Raw API key (encrypted before storage, never returned) |
+
+**Auth:** `Authorization: Bearer <supabase-access-token>` required.
+
+**Response:** `{ success: true, provider, prefix: "sk-a…" }`
+
+---
+
+#### `POST /api/keys/delete`
+
+Remove a stored API key.
+
+| Body Field | Type | Description |
+|------------|------|-------------|
+| `provider` | string | Provider ID to delete |
+
+**Auth:** Required.
+
+---
+
+#### `GET /api/keys/status`
+
+List which providers have saved keys (never returns key values).
+
+**Auth:** Required.
+
+**Response:** `{ keys: [{ provider, prefix, updatedAt }] }`
 
 ---
 
@@ -1155,9 +1198,18 @@ CSS overrides applied when `data-theme="light"` on root element. Inverts the dar
 ai-workbench/
 ├── api/                              # Vercel Serverless Functions
 │   ├── _lib/
-│   │   └── security.ts              # Shared security: rate limiter, SSRF protection, URL validation, AI endpoint whitelist
+│   │   ├── security.ts              # Shared security: rate limiter, SSRF protection, URL validation, AI endpoint whitelist
+│   │   ├── auth.ts                  # Server-side Supabase JWT validation + service role client
+│   │   └── encryption.ts           # AES-256-GCM API key encrypt/decrypt
 │   ├── ai/
-│   │   └── chat.ts                  # POST /api/ai/chat — AI API proxy
+│   │   └── chat.ts                  # POST /api/ai/chat — AI proxy with server-side key injection
+│   ├── audio/
+│   │   ├── speech.ts                # POST /api/audio/speech — TTS proxy (Groq)
+│   │   └── transcribe.ts           # POST /api/audio/transcribe — STT proxy (Groq Whisper)
+│   ├── keys/
+│   │   ├── save.ts                  # POST /api/keys/save — Store encrypted API key
+│   │   ├── delete.ts                # POST /api/keys/delete — Remove API key
+│   │   └── status.ts               # GET /api/keys/status — List saved providers
 │   ├── fetch-url.ts                 # GET /api/fetch-url — URL content extraction
 │   └── search.ts                    # GET /api/search — DuckDuckGo + Wikipedia proxy
 │
@@ -1227,7 +1279,8 @@ ai-workbench/
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial_schema.sql  # Tables: profiles, user_settings, conversations, messages, branches, conversation_memory, memory_map, sidebar_folders, user_data, audit_log + RLS + triggers
-│       └── 002_membership_tier.sql # Adds membership_tier column + admin RLS policies
+│       ├── 002_membership_tier.sql # Adds membership_tier column + admin RLS policies
+│       └── 003_user_api_keys.sql   # Server-side encrypted API key storage + RLS
 │
 ├── patches/
 │   └── wouter@3.7.1.patch         # Exposes route paths to window.__WOUTER_ROUTES__
@@ -1259,6 +1312,7 @@ ai-workbench/
 | `memory_map` | `(user_id, namespace)` | Knowledge graph node data |
 | `sidebar_folders` | `(user_id, namespace)` | Folder tree structure |
 | `user_data` | `(user_id, namespace)` | Generic catch-all key-value store |
+| `user_api_keys` | `(user_id, provider)` | AES-256-GCM encrypted API keys (server-side only) |
 | `audit_log` | `id` (BIGINT, auto) | INSERT/UPDATE/DELETE audit trail (admin-only) |
 
 All user-facing tables have **Row-Level Security** enabled with per-user policies. The `audit_log` table has RLS enabled with **no policies**, making it accessible only via `service_role` key or direct database admin access.

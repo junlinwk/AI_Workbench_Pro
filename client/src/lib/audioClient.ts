@@ -1,127 +1,84 @@
 /**
- * Audio client — STT (Whisper) and TTS via Groq or browser fallback
+ * Audio client — STT (Whisper) and TTS via server proxy
  *
- * Strategy:
- * 1. Try direct Groq API (CORS may allow it)
- * 2. Fall back to /api/audio/* proxy
- * 3. Fall back to browser built-in SpeechRecognition / SpeechSynthesis
+ * API keys are stored server-side. The client sends its Supabase auth token
+ * and the proxy injects the Groq key. No raw API keys in client code.
+ *
+ * Fallback to browser SpeechSynthesis if proxy is unavailable.
  */
+import { getAuthToken } from "@/lib/supabase"
 
-/** Transcribe audio blob to text using Groq Whisper */
+/** Transcribe audio blob to text using server proxy (Groq Whisper) */
 export async function transcribeAudio(
   blob: Blob,
-  apiKey: string,
+  _apiKeyUnused?: string,
   language: "auto" | "zh" | "en" = "auto",
 ): Promise<string> {
-  // Try direct Groq API first
-  try {
-    const formData = new FormData()
-    formData.append("file", blob, "recording.webm")
-    formData.append("model", "whisper-large-v3-turbo")
-    // Whisper accepts ISO 639-1 codes; "auto" is not a valid code so omit it
-    if (language !== "auto") {
-      formData.append("language", language)
+  const reader = new FileReader()
+  const base64 = await new Promise<string>((resolve) => {
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.split(",")[1] || "")
     }
+    reader.readAsDataURL(blob)
+  })
 
-    const res = await fetch(
-      "https://api.groq.com/openai/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: formData,
-      },
-    )
-    if (res.ok) {
-      const data = await res.json()
-      return data.text || ""
-    }
-  } catch {
-    // CORS blocked — try proxy
+  const authToken = await getAuthToken()
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  }
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`
   }
 
-  // Proxy fallback
-  try {
-    const reader = new FileReader()
-    const base64 = await new Promise<string>((resolve) => {
-      reader.onload = () => {
-        const result = reader.result as string
-        resolve(result.split(",")[1] || "")
-      }
-      reader.readAsDataURL(blob)
-    })
+  const res = await fetch("/api/audio/transcribe", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ audio: base64, language }),
+  })
 
-    const res = await fetch("/api/audio/transcribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ audio: base64, apiKey }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      return data.text || ""
-    }
-  } catch {
-    // Proxy also failed
+  if (res.ok) {
+    const data = await res.json()
+    return data.text || ""
   }
 
   throw new Error("transcription_failed")
 }
 
-/** Text to speech using Groq TTS or browser fallback */
+/** Text to speech using server proxy (Groq TTS) or browser fallback */
 export async function textToSpeech(
   text: string,
-  apiKey?: string,
+  _apiKeyUnused?: string,
   language: "auto" | "zh" | "en" = "auto",
 ): Promise<void> {
-  if (apiKey) {
-    // Pick voice based on language preference
-    // Arista = English-optimized, Fritz = multilingual/neutral
-    const voice = language === "zh" ? "Fritz-PlayAI" : "Arista-PlayAI"
+  // Pick voice based on language preference
+  const voice = language === "zh" ? "Fritz-PlayAI" : "Arista-PlayAI"
 
-    // Try direct Groq TTS
-    try {
-      const res = await fetch(
-        "https://api.groq.com/openai/v1/audio/speech",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: "playai-tts",
-            input: text.slice(0, 4096),
-            voice,
-            response_format: "wav",
-          }),
-        },
-      )
-      if (res.ok) {
-        const audioBlob = await res.blob()
-        await playAudioBlob(audioBlob)
-        return
-      }
-    } catch {
-      // CORS blocked — try proxy
+  // Try server proxy (keys are injected server-side)
+  try {
+    const authToken = await getAuthToken()
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`
     }
 
-    // Proxy fallback
-    try {
-      const res = await fetch("/api/audio/speech", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: text.slice(0, 4096),
-          apiKey,
-        }),
-      })
-      if (res.ok) {
-        const audioBlob = await res.blob()
-        await playAudioBlob(audioBlob)
-        return
-      }
-    } catch {
-      // Proxy also failed
+    const res = await fetch("/api/audio/speech", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        text: text.slice(0, 4096),
+        voice,
+      }),
+    })
+    if (res.ok) {
+      const audioBlob = await res.blob()
+      await playAudioBlob(audioBlob)
+      return
     }
+  } catch {
+    // Proxy failed — try browser fallback
   }
 
   // Browser SpeechSynthesis fallback

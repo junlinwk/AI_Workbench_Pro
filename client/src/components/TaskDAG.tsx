@@ -36,6 +36,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { ALL_MODELS } from "./ModelSwitcher"
+import { callAI as sharedCallAI } from "@/lib/aiClient"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -380,167 +381,24 @@ function detectsCycle(
 }
 
 /* ------------------------------------------------------------------ */
-/*  AI API caller (multi-provider)                                     */
+/*  AI API caller — delegates to shared callAI (server-side keys)      */
 /* ------------------------------------------------------------------ */
 
 async function callNodeAI(
   prompt: string,
   modelId: string,
-  apiKey: string,
+  _apiKeyUnused: string | undefined,
   temperature: number,
   maxTokens: number,
 ): Promise<string> {
-  const model = ALL_MODELS.find((m) => m.id === modelId) || {
-    id: modelId,
-    providerId: "openai",
-  }
-
-  let endpoint: string
-  let headers: Record<string, string>
-  let body: unknown
-
-  switch (model.providerId) {
-    case "openai":
-    case "deepseek":
-    case "xai": {
-      const baseUrl =
-        model.providerId === "deepseek"
-          ? "https://api.deepseek.com"
-          : model.providerId === "xai"
-            ? "https://api.x.ai"
-            : "https://api.openai.com"
-      endpoint = `${baseUrl}/v1/chat/completions`
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: [{ role: "system", content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    case "anthropic": {
-      endpoint = "https://api.anthropic.com/v1/messages"
-      headers = {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      }
-      body = {
-        model: modelId,
-        system: prompt,
-        messages: [
-          { role: "user", content: "Execute this task." },
-        ],
-        max_tokens: maxTokens,
-        temperature,
-      }
-      break
-    }
-    case "google": {
-      endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
-      headers = { "Content-Type": "application/json" }
-      body = {
-        contents: [
-          { role: "user", parts: [{ text: prompt }] },
-        ],
-        generationConfig: {
-          temperature,
-          maxOutputTokens: maxTokens,
-        },
-      }
-      break
-    }
-    case "meta": {
-      endpoint =
-        "https://api.groq.com/openai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: [{ role: "system", content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    case "mistral": {
-      endpoint =
-        "https://api.mistral.ai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: [{ role: "system", content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    case "openrouter": {
-      endpoint =
-        "https://openrouter.ai/api/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": typeof window !== "undefined" ? window.location.origin : "",
-        "X-OpenRouter-Title": "AI Workbench",
-      }
-      body = {
-        model: modelId,
-        messages: [{ role: "system", content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    default:
-      throw new Error(`Unsupported provider: ${model.providerId}`)
-  }
-
-  // Use proxy on localhost always, and on production for CORS-blocked providers
-  const useProxy =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" ||
-      model.providerId === "openrouter")
-
-  let res: Response
-  if (useProxy) {
-    res = await fetch("/api/ai/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint, headers, body }),
-    })
-  } else {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    })
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(
-      `API error (${res.status}): ${text.slice(0, 200)}`,
-    )
-  }
-  const data = await res.json()
-
-  if (model.providerId === "anthropic")
-    return data.content?.[0]?.text || ""
-  if (model.providerId === "google")
-    return (
-      data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-    )
-  return data.choices?.[0]?.message?.content || ""
+  return sharedCallAI(
+    [{ role: "user", content: prompt }],
+    modelId,
+    undefined,
+    temperature,
+    maxTokens,
+    "",
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -722,7 +580,7 @@ You must respond in this exact JSON format:
 async function checkStagnation(
   history: string[],
   modelId: string,
-  apiKey: string,
+  _apiKeyUnused?: string,
 ): Promise<boolean> {
   if (history.length < 3) return false
   const last3 = history.slice(-3)
@@ -741,7 +599,7 @@ async function checkStagnation(
       const result = await callNodeAI(
         analysisPrompt,
         modelId,
-        apiKey,
+        undefined,
         0,
         50,
       )
@@ -758,7 +616,7 @@ async function checkStagnation(
 /* ------------------------------------------------------------------ */
 
 export default function TaskDAG() {
-  const { settings, getApiKey, hasApiKey } = useSettings()
+  const { settings, hasApiKey } = useSettings()
   const { user } = useAuth()
   const en = settings.language === "en"
   const userId = user?.id || "anon"
@@ -1454,9 +1312,6 @@ export default function TaskDAG() {
       return
     }
 
-    const apiKey = getApiKey(currentModel.providerId)
-    if (!apiKey) return
-
     runningRef.current = true
     stopRef.current = false
     setIsRunning(true)
@@ -1608,7 +1463,7 @@ export default function TaskDAG() {
       const fullPrompt = buildNodePrompt(node, allNodesSnapshot, allEdgesSnapshot, predecessorOutputs, mergedEdgePrompt, visitCounts)
 
       try {
-        const rawResponse = await callNodeAI(fullPrompt, settings.selectedModelId, apiKey, settings.temperature, settings.maxTokens)
+        const rawResponse = await callNodeAI(fullPrompt, settings.selectedModelId, undefined, settings.temperature, settings.maxTokens)
         if (stopRef.current) return
 
         const parsed = parseAIResponse(rawResponse)
@@ -1621,7 +1476,7 @@ export default function TaskDAG() {
 
         // Check stagnation after 3+ iterations
         if (visits >= 3) {
-          checkStagnation(history, settings.selectedModelId, apiKey).then(
+          checkStagnation(history, settings.selectedModelId, undefined).then(
             (isStagnant) => {
               if (isStagnant) {
                 setStagnationWarning({
@@ -1775,7 +1630,6 @@ export default function TaskDAG() {
     settings.temperature,
     settings.maxTokens,
     hasApiKey,
-    getApiKey,
   ])
 
   // Run single node
@@ -1796,9 +1650,6 @@ export default function TaskDAG() {
         )
         return
       }
-      const apiKey = getApiKey(currentModel.providerId)
-      if (!apiKey) return
-
       setNodes((prev) =>
         prev.map((n) =>
           n.id === nodeId
@@ -1840,7 +1691,7 @@ export default function TaskDAG() {
         const rawResponse = await callNodeAI(
           fullPrompt,
           settings.selectedModelId,
-          apiKey,
+          undefined,
           settings.temperature,
           settings.maxTokens,
         )
@@ -1881,7 +1732,6 @@ export default function TaskDAG() {
       settings.temperature,
       settings.maxTokens,
       hasApiKey,
-      getApiKey,
     ],
   )
 

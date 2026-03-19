@@ -906,10 +906,6 @@ export default function Notepad() {
 
   /* ---- AI Condensation ---- */
   const [isCondensing, setIsCondensing] = useState(false)
-  const [condensedResult, setCondensedResult] = useState<{
-    noteTitle: string
-    content: string
-  } | null>(null)
 
   const handleCondense = useCallback(async () => {
     if (!activeNote || activeNote.entries.length === 0) {
@@ -920,14 +916,7 @@ export default function Notepad() {
     const model = ALL_MODELS.find(
       (m) => m.id === settings.selectedModelId,
     ) || ALL_MODELS[0]
-    const apiKey = settings.apiKeys[model.providerId]
-    if (!apiKey) {
-      toast.error(txt("noApiKey", lang))
-      return
-    }
-
     setIsCondensing(true)
-    setCondensedResult(null)
 
     try {
       const markdownContent = noteToMarkdown(activeNote)
@@ -939,15 +928,32 @@ export default function Notepad() {
           },
         ],
         settings.selectedModelId,
-        apiKey,
+        undefined,
         0.3,
         4096,
         "You are a helpful note organization assistant. Output clean, well-structured markdown.",
       )
 
-      setCondensedResult({
-        noteTitle: activeNote.title,
+      // Immediately create a new note with the condensed result
+      // so it's persisted to localStorage and never lost
+      const noteTitle = activeNote.title
+      const note = createNote(
+        txt("condensedTitle", lang) + noteTitle,
+      )
+      note.entries.push({
+        id: uid(),
+        type: "text",
         content: result,
+        createdAt: new Date().toISOString(),
+      })
+      setState((prev) => {
+        const next = {
+          notes: [...prev.notes, note],
+          activeNoteId: note.id,
+        }
+        // Persist immediately (no debounce) to avoid data loss
+        saveUserData(userId, STORAGE_NS, next)
+        return next
       })
       toast.success(
         lang === "zh-TW" ? "AI 濃縮整理完成" : "AI condensation complete",
@@ -959,25 +965,7 @@ export default function Notepad() {
     } finally {
       setIsCondensing(false)
     }
-  }, [activeNote, settings, lang])
-
-  const handleOpenCondensed = useCallback(() => {
-    if (!condensedResult) return
-    const note = createNote(
-      txt("condensedTitle", lang) + condensedResult.noteTitle,
-    )
-    note.entries.push({
-      id: uid(),
-      type: "text",
-      content: condensedResult.content,
-      createdAt: new Date().toISOString(),
-    })
-    persistState({
-      notes: [...state.notes, note],
-      activeNoteId: note.id,
-    })
-    setCondensedResult(null)
-  }, [condensedResult, state, lang, persistState])
+  }, [activeNote, settings, lang, userId])
 
   /* ---- Input state ---- */
   const [inputValue, setInputValue] = useState("")
@@ -1431,19 +1419,6 @@ export default function Notepad() {
                 {txt("condensing", lang)}
               </span>
             </div>
-          )}
-
-          {/* Condensed result link */}
-          {condensedResult && (
-            <button
-              className="mb-3 flex w-full items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5 text-left hover:bg-emerald-500/15 transition-colors"
-              onClick={handleOpenCondensed}
-            >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-              <span className="text-xs text-emerald-300 truncate">
-                {txt("condensedLink", lang)}
-              </span>
-            </button>
           )}
 
           {/* Entries */}

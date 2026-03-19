@@ -64,17 +64,26 @@ function saveEmbeddingCache(
 
 async function callGeminiEmbedding(
   text: string,
-  apiKey: string,
+  _apiKeyUnused: string,
   modelId: string,
 ): Promise<number[]> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:embedContent?key=${apiKey}`
+  // Route through the AI proxy — API key is injected server-side
+  const { getAuthToken } = await import("@/lib/supabase")
+  const authToken = await getAuthToken()
+  const proxyHeaders: Record<string, string> = { "Content-Type": "application/json" }
+  if (authToken) proxyHeaders["Authorization"] = `Bearer ${authToken}`
 
-  const res = await fetch(endpoint, {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:embedContent`
+  const res = await fetch("/api/ai/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: proxyHeaders,
     body: JSON.stringify({
-      model: `models/${modelId}`,
-      content: { parts: [{ text }] },
+      endpoint,
+      provider: "google",
+      body: {
+        model: `models/${modelId}`,
+        content: { parts: [{ text }] },
+      },
     }),
   })
 

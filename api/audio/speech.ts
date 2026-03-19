@@ -1,6 +1,8 @@
-// ─── Text-to-speech proxy (Groq TTS) ──────────────────────
+// ─── Text-to-speech proxy (Groq TTS) — server-side key injection ──────────
 
 import type { IncomingMessage, ServerResponse } from "http"
+import { getAuthenticatedUserId, getServiceSupabase } from "../_lib/auth"
+import { decryptApiKey } from "../_lib/encryption"
 
 interface VercelReq extends IncomingMessage {
   body?: any
@@ -27,6 +29,29 @@ function getIp(headers: Record<string, string | string[] | undefined>): string {
   return "unknown"
 }
 
+async function getStoredGroqKey(userId: string): Promise<string | null> {
+  try {
+    const supabase = getServiceSupabase()
+    // Try "groq" first, then "meta" (they share the same key)
+    for (const provider of ["groq", "meta"]) {
+      const { data, error } = await supabase
+        .from("user_api_keys")
+        .select("encrypted_key, iv")
+        .eq("user_id", userId)
+        .eq("provider", provider)
+        .single()
+      if (!error && data) {
+        const ciphertext = Buffer.from(data.encrypted_key, "base64")
+        const iv = Buffer.from(data.iv, "base64")
+        return decryptApiKey(ciphertext, iv)
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export default async function handler(req: VercelReq, res: ServerResponse & { status: (code: number) => any; json: (data: any) => void; send: (data: any) => void; setHeader: (k: string, v: string) => void }) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" })
@@ -37,9 +62,21 @@ export default async function handler(req: VercelReq, res: ServerResponse & { st
     return res.status(429).json({ error: "Rate limited" })
   }
 
-  const { text, apiKey } = req.body || {}
-  if (!text || !apiKey) {
-    return res.status(400).json({ error: "Missing text or apiKey" })
+  const { text, apiKey: legacyKey, voice } = req.body || {}
+  if (!text) {
+    return res.status(400).json({ error: "Missing text" })
+  }
+
+  // Resolve API key: prefer server-side stored key, fall back to legacy
+  let resolvedKey = legacyKey
+  const userId = await getAuthenticatedUserId(req.headers.authorization)
+  if (userId) {
+    const storedKey = await getStoredGroqKey(userId)
+    if (storedKey) resolvedKey = storedKey
+  }
+
+  if (!resolvedKey) {
+    return res.status(400).json({ error: "No Groq API key available" })
   }
 
   try {
@@ -49,12 +86,12 @@ export default async function handler(req: VercelReq, res: ServerResponse & { st
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${resolvedKey}`,
         },
         body: JSON.stringify({
           model: "playai-tts",
           input: String(text).slice(0, 4096),
-          voice: "Arista-PlayAI",
+          voice: voice || "Arista-PlayAI",
           response_format: "wav",
         }),
       },

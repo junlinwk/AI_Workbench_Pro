@@ -336,7 +336,163 @@ function vitePluginSearchProxy(): Plugin {
           res.end(JSON.stringify({ text: "", error: err.message }));
         }
       });
-      // ── /api/ai/chat — AI API proxy (whitelist-only) ──
+      // ── Helper: parse JSON body from request ──
+      function parseBody(req: any): Promise<any> {
+        return new Promise((resolve, reject) => {
+          const reqBody = (req as { body?: unknown }).body;
+          if (reqBody && typeof reqBody === "object") return resolve(reqBody);
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+        });
+      }
+
+      // ── Helper: validate Supabase JWT and return user ID ──
+      async function getDevUserId(req: any): Promise<string | null> {
+        const auth = req.headers?.authorization;
+        if (!auth || typeof auth !== "string") return null;
+        const token = auth.replace(/^Bearer\s+/i, "").trim();
+        if (!token) return null;
+        const sbUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+        const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!sbUrl || !sbKey) return null;
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
+          const { data, error } = await sb.auth.getUser(token);
+          if (error || !data?.user) return null;
+          return data.user.id;
+        } catch { return null; }
+      }
+
+      // ── Helper: get encrypted key from DB ──
+      async function getDevStoredKey(userId: string, provider: string): Promise<string | null> {
+        const sbUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+        const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const encSecret = process.env.API_KEY_ENCRYPTION_SECRET;
+        if (!sbUrl || !sbKey || !encSecret) return null;
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const crypto = await import("crypto");
+          const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
+          // Try the provider, then fallback for groq/meta sharing
+          const providers = provider === "meta" ? ["groq", "meta"] : provider === "groq" ? ["groq", "meta"] : [provider];
+          for (const p of providers) {
+            const { data, error } = await sb.from("user_api_keys").select("encrypted_key, iv").eq("user_id", userId).eq("provider", p).single();
+            if (!error && data) {
+              const key = crypto.createHash("sha256").update(encSecret).digest();
+              const iv = Buffer.from(data.iv, "base64");
+              const ct = Buffer.from(data.encrypted_key, "base64");
+              const encrypted = ct.subarray(0, ct.length - 16);
+              const tag = ct.subarray(ct.length - 16);
+              const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+              decipher.setAuthTag(tag);
+              return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+            }
+          }
+          return null;
+        } catch { return null; }
+      }
+
+      // ── Helper: build auth headers for AI provider ──
+      function buildProviderHeaders(provider: string, apiKey: string): Record<string, string> {
+        switch (provider) {
+          case "anthropic": return { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+          case "google": return { "Content-Type": "application/json", "x-goog-api-key": apiKey };
+          case "openrouter": return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": "https://ai-workbench.app", "X-OpenRouter-Title": "AI Workbench" };
+          default: return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` };
+        }
+      }
+
+      // ── /api/keys/save — Store encrypted API key ──
+      server.middlewares.use("/api/keys/save", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        const userId = await getDevUserId(req);
+        if (!userId) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Unauthorized" })); return; }
+        try {
+          const body = await parseBody(req);
+          const { provider, key } = body;
+          if (!provider || !key) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Invalid" })); return; }
+          const crypto = await import("crypto");
+          const encSecret = process.env.API_KEY_ENCRYPTION_SECRET;
+          if (!encSecret) { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Encryption not configured" })); return; }
+          const encKey = crypto.createHash("sha256").update(encSecret).digest();
+          const iv = crypto.randomBytes(12);
+          const cipher = crypto.createCipheriv("aes-256-gcm", encKey, iv);
+          const encrypted = Buffer.concat([cipher.update(key, "utf8"), cipher.final()]);
+          const tag = cipher.getAuthTag();
+          const ciphertext = Buffer.concat([encrypted, tag]);
+          const { createClient } = await import("@supabase/supabase-js");
+          const sb = createClient(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || "", { auth: { persistSession: false } });
+          await sb.from("user_api_keys").upsert({ user_id: userId, provider, encrypted_key: ciphertext.toString("base64"), iv: iv.toString("base64"), key_prefix: key.slice(0, 4) + "…", updated_at: new Date().toISOString() }, { onConflict: "user_id,provider" });
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ success: true, provider, prefix: key.slice(0, 4) + "…" }));
+        } catch { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Internal error" })); }
+      });
+
+      // ── /api/keys/delete — Remove API key ──
+      server.middlewares.use("/api/keys/delete", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        const userId = await getDevUserId(req);
+        if (!userId) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Unauthorized" })); return; }
+        try {
+          const body = await parseBody(req);
+          const { createClient } = await import("@supabase/supabase-js");
+          const sb = createClient(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || "", { auth: { persistSession: false } });
+          await sb.from("user_api_keys").delete().eq("user_id", userId).eq("provider", body.provider);
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ success: true }));
+        } catch { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Internal error" })); }
+      });
+
+      // ── /api/keys/status — List saved key providers ──
+      server.middlewares.use("/api/keys/status", async (req, res, next) => {
+        if (req.method !== "GET") return next();
+        const userId = await getDevUserId(req);
+        if (!userId) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Unauthorized" })); return; }
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const sb = createClient(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "", process.env.SUPABASE_SERVICE_ROLE_KEY || "", { auth: { persistSession: false } });
+          const { data } = await sb.from("user_api_keys").select("provider, key_prefix, updated_at").eq("user_id", userId);
+          const keys = (data || []).map((r: any) => ({ provider: r.provider, prefix: r.key_prefix, updatedAt: r.updated_at }));
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ keys }));
+        } catch { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Internal error" })); }
+      });
+
+      // ── /api/audio/speech — TTS proxy (server-side keys) ──
+      server.middlewares.use("/api/audio/speech", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        try {
+          const body = await parseBody(req);
+          let groqKey = body.apiKey; // legacy fallback
+          const userId = await getDevUserId(req);
+          if (userId) { const stored = await getDevStoredKey(userId, "groq"); if (stored) groqKey = stored; }
+          if (!groqKey) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "No Groq key" })); return; }
+          const groqRes = await fetch("https://api.groq.com/openai/v1/audio/speech", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` }, body: JSON.stringify({ model: "playai-tts", input: String(body.text).slice(0, 4096), voice: body.voice || "Arista-PlayAI", response_format: "wav" }) });
+          if (!groqRes.ok) { const err = await groqRes.text().catch(() => ""); res.writeHead(groqRes.status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: err.slice(0, 200) })); return; }
+          const buf = await groqRes.arrayBuffer();
+          res.writeHead(200, { "Content-Type": "audio/wav" }); res.end(Buffer.from(buf));
+        } catch { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Internal error" })); }
+      });
+
+      // ── /api/audio/transcribe — STT proxy (server-side keys) ──
+      server.middlewares.use("/api/audio/transcribe", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        try {
+          const body = await parseBody(req);
+          let groqKey = body.apiKey;
+          const userId = await getDevUserId(req);
+          if (userId) { const stored = await getDevStoredKey(userId, "groq"); if (stored) groqKey = stored; }
+          if (!groqKey) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "No Groq key" })); return; }
+          const buffer = Buffer.from(body.audio, "base64");
+          const boundary = "----AudioBoundary" + Date.now();
+          const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="recording.webm"\r\nContent-Type: audio/webm\r\n\r\n`), buffer, Buffer.from("\r\n"), Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3-turbo\r\n`), Buffer.from(`--${boundary}--\r\n`)];
+          const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: Buffer.concat(parts) });
+          if (!groqRes.ok) { const err = await groqRes.text().catch(() => ""); res.writeHead(groqRes.status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: err.slice(0, 200) })); return; }
+          const data = await groqRes.json();
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ text: data.text || "" }));
+        } catch { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Internal error" })); }
+      });
+
+      // ── /api/ai/chat — AI API proxy (whitelist-only, server-side key injection) ──
       server.middlewares.use("/api/ai/chat", async (req, res, next) => {
         if (req.method !== "POST") return next();
 
@@ -351,38 +507,46 @@ function vitePluginSearchProxy(): Plugin {
           "https://openrouter.ai/",
         ];
 
-        let body = "";
-        req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-        req.on("end", async () => {
-          try {
-            const { endpoint, headers: fwdHeaders, body: reqBody } = JSON.parse(body);
-            if (!endpoint || !ALLOWED_PREFIXES.some((p: string) => endpoint.startsWith(p))) {
-              res.writeHead(403, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: "Endpoint not allowed" }));
-              return;
-            }
-            // Strip dangerous headers
-            const BLOCKED = new Set(["host", "cookie", "set-cookie", "origin", "referer", "x-forwarded-for", "x-real-ip"]);
-            const safeHeaders: Record<string, string> = {};
-            if (fwdHeaders && typeof fwdHeaders === "object") {
-              for (const [k, v] of Object.entries(fwdHeaders)) {
-                if (typeof v === "string" && !BLOCKED.has(k.toLowerCase())) safeHeaders[k] = v;
-              }
-            }
-            const apiRes = await fetch(endpoint, {
-              method: "POST",
-              headers: safeHeaders,
-              body: typeof reqBody === "string" ? reqBody : JSON.stringify(reqBody),
-              signal: AbortSignal.timeout(120_000),
-            });
-            res.writeHead(apiRes.status, { "Content-Type": apiRes.headers.get("content-type") || "application/json" });
-            const resBody = await apiRes.text();
-            res.end(resBody);
-          } catch (err: any) {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "AI API request failed" }));
+        try {
+          const parsed = await parseBody(req);
+          const { endpoint, headers: fwdHeaders, body: reqBody, provider } = parsed;
+          if (!endpoint || !ALLOWED_PREFIXES.some((p: string) => endpoint.startsWith(p))) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Endpoint not allowed" }));
+            return;
           }
-        });
+
+          let finalHeaders: Record<string, string> = {};
+
+          // New flow: provider-based, fetch key from DB
+          if (provider && typeof provider === "string") {
+            const userId = await getDevUserId(req);
+            if (!userId) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Unauthorized" })); return; }
+            const apiKey = await getDevStoredKey(userId, provider);
+            if (!apiKey) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: `No key for ${provider}` })); return; }
+            finalHeaders = buildProviderHeaders(provider, apiKey);
+          }
+          // Legacy flow: client sends raw headers
+          else if (fwdHeaders && typeof fwdHeaders === "object") {
+            const BLOCKED = new Set(["host", "cookie", "set-cookie", "origin", "referer", "x-forwarded-for", "x-real-ip"]);
+            for (const [k, v] of Object.entries(fwdHeaders)) {
+              if (typeof v === "string" && !BLOCKED.has(k.toLowerCase())) finalHeaders[k] = v;
+            }
+          }
+
+          const apiRes = await fetch(endpoint, {
+            method: "POST",
+            headers: finalHeaders,
+            body: typeof reqBody === "string" ? reqBody : JSON.stringify(reqBody),
+            signal: AbortSignal.timeout(120_000),
+          });
+          res.writeHead(apiRes.status, { "Content-Type": apiRes.headers.get("content-type") || "application/json" });
+          const resBody = await apiRes.text();
+          res.end(resBody);
+        } catch (err: any) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "AI API request failed" }));
+        }
       });
     },
   };

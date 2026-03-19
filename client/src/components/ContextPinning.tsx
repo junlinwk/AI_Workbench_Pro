@@ -8,6 +8,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { callAI } from "@/lib/aiClient";
 import { loadUserData, saveUserData } from "@/lib/storage";
 import {
   Pin,
@@ -192,7 +193,7 @@ function tokenTextColor(count: number) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ContextPinning() {
-  const { settings, getApiKey } = useSettings();
+  const { settings, hasApiKey } = useSettings();
   const lang = settings.language;
   const { user } = useAuth();
 
@@ -546,8 +547,7 @@ export default function ContextPinning() {
         return;
       }
 
-      const apiKey = getApiKey(model.providerId);
-      if (!apiKey) {
+      if (!hasApiKey(model.providerId)) {
         toast.error(
           lang === "en"
             ? "Please set an API key in Settings first"
@@ -565,111 +565,14 @@ export default function ContextPinning() {
         pin.content;
 
       try {
-        // Build request using the same logic as ChatInterface's callAI
-        let endpoint: string;
-        let headers: Record<string, string>;
-        let body: unknown;
-
-        switch (model.providerId) {
-          case "anthropic": {
-            endpoint = "https://api.anthropic.com/v1/messages";
-            headers = {
-              "Content-Type": "application/json",
-              "x-api-key": apiKey,
-              "anthropic-version": "2023-06-01",
-              "anthropic-dangerous-direct-browser-access": "true",
-            };
-            body = {
-              model: model.id,
-              system: "You are a concise summarizer.",
-              messages: [{ role: "user", content: condensationPrompt }],
-              max_tokens: 1024,
-              temperature: 0.3,
-            };
-            break;
-          }
-          case "google": {
-            endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${apiKey}`;
-            headers = { "Content-Type": "application/json" };
-            body = {
-              contents: [{ role: "user", parts: [{ text: condensationPrompt }] }],
-              generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
-            };
-            break;
-          }
-          case "openrouter": {
-            endpoint = "https://openrouter.ai/api/v1/chat/completions";
-            headers = {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-              "HTTP-Referer": window.location.origin,
-              "X-OpenRouter-Title": "AI Workbench",
-            };
-            body = {
-              model: model.id,
-              messages: [
-                { role: "system", content: "You are a concise summarizer." },
-                { role: "user", content: condensationPrompt },
-              ],
-              temperature: 0.3,
-              max_tokens: 1024,
-            };
-            break;
-          }
-          default: {
-            // OpenAI-compatible (openai, deepseek, xai, meta/groq, mistral)
-            const baseUrl =
-              model.providerId === "deepseek"
-                ? "https://api.deepseek.com"
-                : model.providerId === "xai"
-                  ? "https://api.x.ai"
-                  : model.providerId === "meta"
-                    ? "https://api.groq.com/openai"
-                    : model.providerId === "mistral"
-                      ? "https://api.mistral.ai"
-                      : "https://api.openai.com";
-            endpoint = `${baseUrl}/v1/chat/completions`;
-            headers = {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            };
-            body = {
-              model: model.id,
-              messages: [
-                { role: "system", content: "You are a concise summarizer." },
-                { role: "user", content: condensationPrompt },
-              ],
-              temperature: 0.3,
-              max_tokens: 1024,
-            };
-            break;
-          }
-        }
-
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          if (res.status === 429) {
-            throw new Error(lang === "en" ? "Rate limited. Please wait and try again." : "請求過於頻繁，請稍後再試。");
-          }
-          const errText = await res.text().catch(() => "");
-          throw new Error(`API error (${res.status}): ${errText.slice(0, 150)}`);
-        }
-
-        const data = await res.json();
-        let condensedText: string;
-
-        if (model.providerId === "anthropic") {
-          condensedText = data.content?.[0]?.text || "(No response)";
-        } else if (model.providerId === "google") {
-          condensedText = data.candidates?.[0]?.content?.parts?.[0]?.text || "(No response)";
-        } else {
-          condensedText = data.choices?.[0]?.message?.content || "(No response)";
-        }
+        const condensedText = await callAI(
+          [{ role: "user", content: condensationPrompt }],
+          model.id,
+          undefined,
+          0.3,
+          1024,
+          "You are a concise summarizer.",
+        );
 
         setPins((prev) =>
           prev.map((p) =>
@@ -695,7 +598,7 @@ export default function ContextPinning() {
         );
       }
     },
-    [pins, settings, lang, getApiKey]
+    [pins, settings, lang, hasApiKey]
   );
 
   const handleDeleteClick = useCallback(

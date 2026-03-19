@@ -18,7 +18,8 @@
       "Bash(npm view:*)",
       "Bash(npm search:*)",
       "Bash(pnpm:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\(''docs/media/logo-banner.png''\\); print\\(f''{img.width}x{img.height}''\\)\")"
     ]
   }
 }

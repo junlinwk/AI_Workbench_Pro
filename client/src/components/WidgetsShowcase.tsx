@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { loadUserData, saveUserData, sanitizeText } from "@/lib/storage"
 import { t } from "@/i18n"
 import { ALL_MODELS, MODEL_PROVIDERS, getAllModels } from "./ModelSwitcher"
+import { callAI } from "@/lib/aiClient"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -60,181 +61,7 @@ Widget types you can create include:
 
 Always write clean, modern code. For React widgets, use hooks and Tailwind CSS. Keep widgets self-contained.`
 
-/* ------------------------------------------------------------------ */
-/*  API call (simplified from ChatInterface)                           */
-/* ------------------------------------------------------------------ */
-
-async function callAI(
-  messages: { role: string; content: string }[],
-  modelId: string,
-  apiKey: string,
-  temperature: number,
-  maxTokens: number,
-  systemPrompt: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const model = ALL_MODELS.find((m) => m.id === modelId) || {
-    id: modelId,
-    name: modelId,
-    providerId: "openai",
-    description: "",
-    speed: 3,
-    intelligence: 3,
-    contextWindow: "",
-  }
-
-  const sysMessages = systemPrompt
-    ? [{ role: "system", content: systemPrompt }]
-    : []
-  const allMessages = [...sysMessages, ...messages]
-
-  let endpoint: string
-  let headers: Record<string, string>
-  let body: any
-
-  switch (model.providerId) {
-    case "openai":
-    case "deepseek":
-    case "xai": {
-      const baseUrl =
-        model.providerId === "deepseek"
-          ? "https://api.deepseek.com"
-          : model.providerId === "xai"
-            ? "https://api.x.ai"
-            : "https://api.openai.com"
-      endpoint = `${baseUrl}/v1/chat/completions`
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: allMessages,
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    case "anthropic": {
-      endpoint = "https://api.anthropic.com/v1/messages"
-      headers = {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      }
-      const anthropicMessages = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }))
-      body = {
-        model: modelId,
-        messages: anthropicMessages,
-        max_tokens: maxTokens,
-        temperature,
-        ...(systemPrompt && { system: systemPrompt }),
-      }
-      break
-    }
-    case "google": {
-      endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
-      headers = { "Content-Type": "application/json" }
-      body = {
-        contents: messages.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        })),
-        generationConfig: {
-          temperature,
-          maxOutputTokens: maxTokens,
-        },
-        ...(systemPrompt && {
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-        }),
-      }
-      break
-    }
-    case "meta": {
-      endpoint = "https://api.groq.com/openai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: allMessages,
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    case "mistral": {
-      endpoint = "https://api.mistral.ai/v1/chat/completions"
-      headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
-      body = {
-        model: modelId,
-        messages: allMessages,
-        temperature,
-        max_tokens: maxTokens,
-      }
-      break
-    }
-    default:
-      throw new Error(`Unsupported provider: ${model.providerId}`)
-  }
-
-  let res: Response
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
-  } catch (err) {
-    if (err instanceof TypeError) {
-      throw new Error(
-        "Network error — please check your internet connection and try again.",
-      )
-    }
-    throw err
-  }
-
-  if (res.status === 429) {
-    const retryAfter = res.headers.get("retry-after")
-    const waitSeconds = retryAfter ? parseInt(retryAfter, 10) : null
-    const waitMsg = waitSeconds
-      ? `Rate limited. Please retry after ${waitSeconds} seconds.`
-      : "Rate limited. Please wait a moment and try again."
-    throw new Error(waitMsg)
-  }
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => "")
-    throw new Error(`API error (${res.status}): ${err.slice(0, 200)}`)
-  }
-
-  let data: any
-  try {
-    data = await res.json()
-  } catch {
-    throw new Error("Invalid JSON response from API")
-  }
-
-  if (model.providerId === "anthropic") {
-    return data.content?.[0]?.text || "(No response)"
-  }
-  if (model.providerId === "google") {
-    return (
-      data.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "(No response)"
-    )
-  }
-  return data.choices?.[0]?.message?.content || "(No response)"
-}
+/* callAI imported from @/lib/aiClient — keys are injected server-side */
 
 /* ------------------------------------------------------------------ */
 /*  Suggestion chips for widgets                                       */
@@ -405,7 +232,7 @@ function TypingIndicator() {
 /* ------------------------------------------------------------------ */
 
 export default function WidgetsShowcase() {
-  const { settings, hasApiKey, getApiKey } = useSettings()
+  const { settings, hasApiKey } = useSettings()
   const { user } = useAuth()
   const lang = settings.language
   const userId = user?.id || "anonymous"
@@ -438,9 +265,6 @@ export default function WidgetsShowcase() {
   const currentProvider = currentModel
     ? MODEL_PROVIDERS.find((p) => p.id === currentModel.providerId)
     : null
-  const apiKey = currentModel
-    ? getApiKey(currentModel.providerId)
-    : undefined
   const canSend = hasApiKey(currentModel?.providerId || "")
 
   const handleChipClick = useCallback((text: string) => {
@@ -454,7 +278,7 @@ export default function WidgetsShowcase() {
 
     const sanitized = sanitizeText(trimmed, 4096)
 
-    if (!canSend || !apiKey) {
+    if (!canSend) {
       toast.error(
         lang === "en"
           ? `Please set your ${currentProvider?.name || "model"} API key in Settings > Models & API.`
@@ -498,7 +322,7 @@ export default function WidgetsShowcase() {
       const response = await callAI(
         chatHistory,
         settings.selectedModelId,
-        apiKey,
+        undefined,
         settings.temperature,
         settings.maxTokens,
         combinedPrompt,
@@ -564,7 +388,7 @@ export default function WidgetsShowcase() {
       (m) => m.role === "user",
     )
     if (lastUserIdx === -1) return
-    if (!canSend || !apiKey) {
+    if (!canSend) {
       toast.error(t("chat.needApiKey", lang))
       return
     }
@@ -584,7 +408,7 @@ export default function WidgetsShowcase() {
       const response = await callAI(
         chatHistory,
         settings.selectedModelId,
-        apiKey,
+        undefined,
         settings.temperature,
         settings.maxTokens,
         combinedPrompt,

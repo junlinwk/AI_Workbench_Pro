@@ -369,12 +369,13 @@ function ChatTab() {
 }
 
 function ModelsTab() {
-  const { settings, setApiKey, removeApiKey, hasApiKey, getApiKey, addCustomModel, removeCustomModel } = useSettings();
+  const { settings, setApiKey, removeApiKey, hasApiKey, savedKeys, addCustomModel, removeCustomModel } = useSettings();
   const lang = settings.language;
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [showAddModel, setShowAddModel] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
   const [newModel, setNewModel] = useState<CustomModel>({
     id: "",
     name: "",
@@ -385,26 +386,33 @@ function ModelsTab() {
 
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
 
-  const handleSaveKey = (providerId: string) => {
+  const handleSaveKey = async (providerId: string) => {
     const trimmed = keyInput.trim();
     if (!trimmed) return;
     if (trimmed.length < 10) {
       toast.error(lang === "en" ? "API Key is too short" : "API Key 太短");
       return;
     }
-    setApiKey(providerId, trimmed);
-    setKeyInput("");
-    setEditingProvider(null);
-    toast.success(t("models.keySaved", lang));
+    setSavingKey(true);
+    try {
+      await setApiKey(providerId, trimmed);
+      setKeyInput("");
+      setEditingProvider(null);
+      toast.success(t("models.keySaved", lang));
+    } catch {
+      toast.error(lang === "en" ? "Failed to save key" : "儲存金鑰失敗");
+    } finally {
+      setSavingKey(false);
+    }
   };
 
-  const handleRemoveKey = (providerId: string) => {
+  const handleRemoveKey = async (providerId: string) => {
     if (removeConfirmId !== providerId) {
       setRemoveConfirmId(providerId);
       setTimeout(() => setRemoveConfirmId(null), 3000);
       return;
     }
-    removeApiKey(providerId);
+    await removeApiKey(providerId);
     setRemoveConfirmId(null);
     toast.info(t("models.keyRemoved", lang));
   };
@@ -413,53 +421,47 @@ function ModelsTab() {
   const [testResults, setTestResults] = useState<Record<string, "ok" | "fail" | "testing">>({});
 
   const handleTestKey = async (providerId: string) => {
-    const key = getApiKey(providerId);
-    if (!key) return;
+    if (!hasApiKey(providerId)) return;
     setTestingProvider(providerId);
     const provider = MODEL_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
 
-    // Test each model with a minimal request
+    // Test via the server proxy (keys are injected server-side)
+    const { getAuthToken } = await import("@/lib/supabase");
+    const authToken = await getAuthToken();
+    const proxyHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (authToken) proxyHeaders["Authorization"] = `Bearer ${authToken}`;
+
     const results: Record<string, "ok" | "fail" | "testing"> = {};
     for (const model of provider.models) {
       results[model.id] = "testing";
       setTestResults(prev => ({ ...prev, [model.id]: "testing" }));
       try {
         let endpoint: string;
-        let headers: Record<string, string>;
         let body: any;
 
         switch (providerId) {
           case "anthropic":
             endpoint = "https://api.anthropic.com/v1/messages";
-            headers = { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
             body = { model: model.id, messages: [{ role: "user", content: "Hi" }], max_tokens: 5 };
             break;
           case "google":
-            endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${key}`;
-            headers = { "Content-Type": "application/json" };
+            endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent`;
             body = { contents: [{ role: "user", parts: [{ text: "Hi" }] }], generationConfig: { maxOutputTokens: 5 } };
             break;
           default: {
-            const baseUrl = providerId === "deepseek" ? "https://api.deepseek.com" : providerId === "xai" ? "https://api.x.ai" : providerId === "meta" ? "https://api.groq.com/openai" : providerId === "mistral" ? "https://api.mistral.ai" : providerId === "openrouter" ? "https://openrouter.ai/api" : "https://api.openai.com";
+            const baseUrl = providerId === "deepseek" ? "https://api.deepseek.com" : providerId === "xai" ? "https://api.x.ai" : providerId === "meta" || providerId === "groq" ? "https://api.groq.com/openai" : providerId === "mistral" ? "https://api.mistral.ai" : providerId === "openrouter" ? "https://openrouter.ai/api" : "https://api.openai.com";
             endpoint = `${baseUrl}/v1/chat/completions`;
-            headers = { "Content-Type": "application/json", "Authorization": `Bearer ${key}`, ...(providerId === "openrouter" && { "HTTP-Referer": window.location.origin, "X-OpenRouter-Title": "AI Workbench" }) };
             body = { model: model.id, messages: [{ role: "user", content: "Hi" }], max_tokens: 5 };
           }
         }
 
-        // Route CORS-blocked providers through proxy
-        let res: Response;
-        if (providerId === "openrouter") {
-          res = await fetch("/api/ai/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ endpoint, headers, body }),
-            signal: AbortSignal.timeout(10000),
-          });
-        } else {
-          res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
-        }
+        const res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: proxyHeaders,
+          body: JSON.stringify({ endpoint, body, provider: providerId }),
+          signal: AbortSignal.timeout(15000),
+        });
         results[model.id] = res.ok ? "ok" : "fail";
       } catch {
         results[model.id] = "fail";
@@ -497,7 +499,6 @@ function ModelsTab() {
       {MODEL_PROVIDERS.map(provider => {
         const has = hasApiKey(provider.id);
         const isEditing = editingProvider === provider.id;
-        const currentKey = getApiKey(provider.id);
 
         return (
           <div key={provider.id} className="rounded-xl border border-white/8 bg-white/3 overflow-hidden">
@@ -574,22 +575,25 @@ function ModelsTab() {
                     </button>
                     <button
                       onClick={() => handleSaveKey(provider.id)}
-                      disabled={!keyInput.trim()}
+                      disabled={!keyInput.trim() || savingKey}
                       className={cn(
                         "px-2 py-1 rounded text-xs font-medium transition-colors",
-                        keyInput.trim() ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-white/5 text-white/20"
+                        keyInput.trim() && !savingKey ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-white/5 text-white/20"
                       )}
                     >
-                      {t("models.save", lang)}
+                      {savingKey ? (lang === "en" ? "Saving..." : "儲存中...") : t("models.save", lang)}
                     </button>
                   </div>
                 </div>
-                {has && currentKey && (
-                  <div className="flex items-center gap-2 text-xs text-white/30">
-                    <Check size={11} className="text-emerald-400" />
-                    <span>{t("models.currentKey", lang)}{currentKey.slice(0, 8)}...{currentKey.slice(-4)}</span>
-                  </div>
-                )}
+                {has && (() => {
+                  const info = savedKeys.find(k => k.provider === provider.id);
+                  return info ? (
+                    <div className="flex items-center gap-2 text-xs text-white/30">
+                      <Check size={11} className="text-emerald-400" />
+                      <span>{t("models.currentKey", lang)}{info.prefix} (🔒 {lang === "en" ? "stored on server" : "伺服器端加密儲存"})</span>
+                    </div>
+                  ) : null;
+                })()}
               </div>
             )}
 
