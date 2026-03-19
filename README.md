@@ -5,6 +5,7 @@
 <img src="docs/media/logo-banner.png" alt="AI Workbench" width="160" />
 
 <br>
+<br>
 
 **A production-ready, multi-provider AI chat platform**
 
