@@ -204,7 +204,8 @@ The architecture is **frontend-heavy** — the Express server is a stateless fil
 - **Auto-naming** — AI generates a summary title from the first message
 - **Message actions** — regenerate, copy, helpful/unhelpful feedback
 - **Citations** with source URL references
-- **OpenRouter CORS proxy** — OpenRouter calls route through `/api/ai/chat` proxy; other providers call directly for speed
+- **Server-side API proxy** — all providers route through `/api/ai/chat` proxy with server-side key injection; raw API keys never reach the browser
+- **Voice & gesture mode** — hands-free AI interaction with TTS auto-read (falls back to browser SpeechSynthesis when no Groq key is configured)
 
 ### Artifacts Panel
 
@@ -212,6 +213,7 @@ The architecture is **frontend-heavy** — the Express server is a stateless fil
 - **Live preview** in sandboxed iframe
 - Auto-populated when the AI generates code
 - Support for React (TSX), HTML, CSS, Python, JavaScript, and more
+- **Markdown auto-detection** — content without explicit `markdown`/`md` language tag is auto-detected via regex scoring (headings, lists, links, bold) and rendered with Streamdown
 - Copy, download, and fullscreen actions
 
 ### Conversation Branching
@@ -264,7 +266,7 @@ The architecture is **frontend-heavy** — the Express server is a stateless fil
 - **Chat preferences**: Send key, streaming, timestamps, markdown
 - **Profile**: Display name, role, bio, custom instructions
 - **Membership**: Classic / Pro / Ultra tiers
-- **Models & API**: Per-provider API key management, custom model registration with provider dropdown selector
+- **Models & API**: Per-provider API key management with server-side encrypted storage (AES-256-GCM), custom model registration with provider dropdown selector
 - **Privacy**: Export/import settings, clear history, analytics opt-in
 - **i18n**: English and Traditional Chinese (zh-TW)
 
@@ -330,11 +332,10 @@ The architecture is **frontend-heavy** — the Express server is a stateless fil
 
 - **Offline-first**: IndexedDB per-user database — works without internet
 - **Cloud sync**: Every write queued → debounced (500ms) → drained every 3-5s to Supabase
-- **Immediate sync**: Settings & API key changes trigger instant `triggerSync()` push
-- **Real-time API key sync**: API key changes push immediately; other devices receive update via Realtime `storage-remote-update` event and auto-merge
-- **Cross-device**: Login on another device → `initialPull()` restores all data, clears stale sync queue
+- **Immediate sync**: Settings changes trigger instant `triggerSync()` push
+- **Server-side API key vault**: API keys encrypted with AES-256-GCM and stored in a dedicated `user_api_keys` table — never included in settings sync or sent to the client
+- **Cross-device**: Login on another device → `initialPull()` restores all data, clears stale sync queue; API keys available immediately via server-side storage
 - **Realtime**: Supabase Realtime subscription for live cross-device updates
-- **API key encryption**: userId-derived key (cross-device portable, prefix `enc3:`)
 - **Conflict resolution**: Per-namespace strategy (field-merge, union-merge, last-write-wins)
 - **Drain mutex**: `isDraining` flag prevents concurrent drain race conditions
 - **Deduplication**: Per-namespace dedup before pushing to Supabase
@@ -387,7 +388,10 @@ The architecture is **frontend-heavy** — the Express server is a stateless fil
 ┌──────────────┐ ┌─────────────┐ ┌─────────────────┐
 │  Express /   │ │  Supabase   │ │  AI Providers   │
 │  Vercel API  │ │ (Auth + DB  │ │ (OpenAI, Claude │
-│  (proxy)     │ │  + Realtime)│ │  Gemini, etc.)  │
+│  (proxy,     │ │  + Realtime │ │  Gemini, etc.)  │
+│  keys inject-│ │  + API Key  │ │                 │
+│  ed server-  │ │    Vault)   │ │                 │
+│  side)       │ │             │ │                 │
 └──────────────┘ └─────────────┘ └─────────────────┘
 ```
 
@@ -706,7 +710,8 @@ AI Workbench 是一個全端 TypeScript/React 應用程式，提供統一介面�
 - **自動命名** — AI 根據第一則訊息產生對話標題
 - **訊息操作** — 重新生成、複製、有用/無用回饋
 - **引用來源** 含 URL 參考
-- **OpenRouter CORS 代理** — OpenRouter 呼叫經由 `/api/ai/chat` 代理；其他供應商直接呼叫以提升速度
+- **伺服器端 API 代理** — 所有供應商經由 `/api/ai/chat` 代理，伺服器端注入 API key；原始金鑰永不傳至瀏覽器
+- **語音與手勢模式** — 免手操控 AI 互動，含 TTS 自動朗讀（無 Groq key 時回退至瀏覽器 SpeechSynthesis）
 
 ### Artifacts 面板
 
@@ -714,6 +719,7 @@ AI Workbench 是一個全端 TypeScript/React 應用程式，提供統一介面�
 - **即時預覽** 在沙盒 iframe 中執行
 - AI 產生程式碼時自動填入
 - 支援 React (TSX)、HTML、CSS、Python、JavaScript 等
+- **Markdown 自動偵測** — 未標記 `markdown`/`md` 語言的內容，透過正則評分（標題、列表、連結、粗體）自動偵測並以 Streamdown 渲染
 - 複製、下載、全螢幕操作
 
 ### 對話分支
@@ -766,7 +772,7 @@ AI Workbench 是一個全端 TypeScript/React 應用程式，提供統一介面�
 - **對話偏好**：傳送按鍵、串流顯示、時間戳記、Markdown
 - **個人資料**：顯示名稱、角色、簡介、自訂指令
 - **會員等級**：Classic / Pro / Ultra
-- **模型與 API**：各供應商 API key 管理、自訂模型註冊（供應商下拉選擇器）
+- **模型與 API**：各供應商 API key 管理（伺服器端 AES-256-GCM 加密儲存）、自訂模型註冊（供應商下拉選擇器）
 - **隱私**：匯出/匯入設定、清除歷史、分析追蹤開關
 - **國際化**：英文與繁體中文 (zh-TW)
 
@@ -832,11 +838,10 @@ AI Workbench 是一個全端 TypeScript/React 應用程式，提供統一介面�
 
 - **離線優先**：每個使用者獨立 IndexedDB 資料庫 — 無網路也能使用
 - **雲端同步**：每次寫入加入佇列 → 防抖（500ms）→ 每 3-5 秒排出推送至 Supabase
-- **即時同步**：設定和 API key 變更立即觸發 `triggerSync()` 推送
-- **即時 API key 同步**：API key 變更立即推送；其他裝置透過 Realtime `storage-remote-update` 事件接收並自動合併
-- **跨裝置**：在新裝置登入 → `initialPull()` 自動還原所有資料，清除過期同步佇列
+- **即時同步**：設定變更立即觸發 `triggerSync()` 推送
+- **伺服器端 API key 保險庫**：API key 以 AES-256-GCM 加密，存於獨立 `user_api_keys` 資料表 — 永不包含於設定同步或傳至客戶端
+- **跨裝置**：在新裝置登入 → `initialPull()` 自動還原所有資料，清除過期同步佇列；API key 透過伺服器端儲存即時可用
 - **即時更新**：Supabase Realtime 訂閱，跨裝置即時同步
-- **API key 加密**：以 userId 派生金鑰加密（跨裝置可攜，前綴 `enc3:`）
 - **衝突解決**：依命名空間策略（field-merge、union-merge、last-write-wins）
 - **排出互斥鎖**：`isDraining` 旗標防止並行排出競態條件
 - **去重**：推送前依命名空間去重
@@ -887,7 +892,9 @@ AI Workbench 是一個全端 TypeScript/React 應用程式，提供統一介面�
 ┌──────────────┐ ┌─────────────┐ ┌─────────────────┐
 │  Express /   │ │  Supabase   │ │   AI 供應商      │
 │  Vercel API  │ │ (認證 + 資料 │ │ (OpenAI, Claude │
-│  (代理)      │ │  庫 + 即時)  │ │  Gemini 等)     │
+│  (代理，      │ │  庫 + 即時 + │ │  Gemini 等)     │
+│  伺服器端    │ │  API Key    │ │                 │
+│  注入金鑰)   │ │  保險庫)    │ │                 │
 └──────────────┘ └─────────────┘ └─────────────────┘
 ```
 
@@ -1073,8 +1080,16 @@ PORT=3000                             # 伺服器 port
 
 ```
 ├── api/                          # Vercel Serverless Functions
-│   ├── _lib/security.ts          #   共用安全工具
-│   ├── ai/chat.ts                #   AI API 代理
+│   ├── _lib/
+│   │   ├── security.ts           #   共用安全工具
+│   │   ├── auth.ts               #   伺服器端 Supabase JWT 驗證
+│   │   └── encryption.ts         #   AES-256-GCM API key 加解密
+│   ├── ai/chat.ts                #   AI API 代理（伺服器端金鑰注入）
+│   ├── audio/speech.ts           #   TTS 代理（Groq）
+│   ├── audio/transcribe.ts       #   STT 代理（Groq Whisper）
+│   ├── keys/save.ts              #   儲存加密 API key
+│   ├── keys/delete.ts            #   刪除 API key
+│   ├── keys/status.ts            #   列出已儲存的 key 供應商
 │   ├── fetch-url.ts              #   URL 內容擷取
 │   └── search.ts                 #   網路搜尋代理
 ├── client/

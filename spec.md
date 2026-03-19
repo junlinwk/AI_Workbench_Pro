@@ -119,13 +119,13 @@ No external state library (no Redux, Zustand, or Jotai). Three React Contexts ha
 | Context | Responsibility | Persistence |
 |---------|---------------|-------------|
 | `AuthContext` | User session, login/logout, OAuth, registration | Supabase session or localStorage fallback |
-| `SettingsContext` | Theme, language, font size, API keys, model selection, chat preferences, user profile | Per-user IndexedDB + Supabase sync |
+| `SettingsContext` | Theme, language, font size, model selection, chat preferences, user profile; API keys managed via server-side `/api/keys/*` endpoints | Per-user IndexedDB + Supabase sync (API keys stored server-side in `user_api_keys` table) |
 | `ThemeContext` | Dark/light/system theme (via `next-themes`) | CSS class on `<html>` |
 
 **SettingsContext** exposes a comprehensive API:
 
 - `updateSetting(key, value)` — update a single setting
-- `setApiKey(provider, key)` / `removeApiKey(provider)` — per-provider API key management
+- `setApiKey(provider, key)` / `removeApiKey(provider)` — per-provider API key management; `setApiKey` is async — stores keys server-side via `/api/keys/save` (AES-256-GCM encrypted), with in-memory fallback on failure
 - `addCustomModel(model)` / `removeCustomModel(id)` — custom model registration
 - `exportSettings()` / `importSettings(json)` — settings portability (API keys excluded from export)
 - `resetSettings()` — restore defaults
@@ -145,7 +145,7 @@ In-Memory Cache  ──→  IndexedDB  ──→  Supabase (cloud sync)
 | IndexedDB | `client/src/lib/storage/idb.ts` | Per-user DB (`ai-wb-u-{userId}`), async persistence |
 | Sync Queue | `client/src/lib/storage/sync-queue.ts` | Batches writes to Supabase |
 | Supabase Sync | `client/src/lib/storage/supabase-sync.ts` | Cloud read/write via Supabase tables |
-| Encryption | `client/src/lib/storage/encryption.ts` | API key obfuscation (XOR + optional AES-256-GCM) |
+| Encryption | `client/src/lib/storage/encryption.ts` | Legacy encryption utilities (no longer used for API keys — keys are now stored server-side) |
 | Migration | `client/src/lib/storage/migration.ts` | Migrates from legacy localStorage to IndexedDB |
 | Conflict Resolver | `client/src/lib/storage/conflict-resolver.ts` | Resolves sync conflicts between local and cloud |
 | Route Mapping | `client/src/lib/storage/types.ts` | Maps namespace to Supabase table |
@@ -190,7 +190,7 @@ clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all 
 
 **Debouncing:** Rapid writes to the same namespace are coalesced via a 500ms debounce timer. Only the latest version is enqueued, preventing sync queue flooding during typing or slider dragging.
 
-**Periodic drain:** Every 3-5 seconds, the sync engine drains the queue and pushes all pending writes to Supabase. An `isDraining` mutex prevents concurrent drain calls from racing. Settings and API key changes also trigger an immediate drain via `triggerSync()`. The drain reads latest data from IDB (not stale queue entries) and deduplicates per namespace before pushing.
+**Periodic drain:** Every 3-5 seconds, the sync engine drains the queue and pushes all pending writes to Supabase. An `isDraining` mutex prevents concurrent drain calls from racing. Settings changes trigger an immediate drain via `triggerSync()` (API keys are stored server-side via `/api/keys/save`, not through the sync queue). The drain reads latest data from IDB (not stale queue entries) and deduplicates per namespace before pushing.
 
 **Conflict resolution strategies (per namespace):**
 
@@ -203,12 +203,12 @@ clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all 
 | `task-dag` | `last-write-wins` | Latest version wins |
 | Default | `last-write-wins` | Latest version wins |
 
-**Cross-device API key sync:**
-- API keys are encrypted with XOR using a userId-derived key (`ai-wb-enc-{userId}-v3`)
-- The same userId produces the same key on any device
-- Encrypted keys are stored in Supabase `user_data` table as part of settings
-- On login, `pullSettingsFromCloud()` fetches and decrypts keys from cloud
-- Prefix `enc3:` identifies userId-based encryption (vs. legacy `enc2:` device-based)
+**Cross-device API key availability:**
+- API keys are encrypted with AES-256-GCM on the server and stored in a dedicated `user_api_keys` table
+- Keys are never included in the settings namespace or sent to the client
+- The client calls `/api/keys/status` on login to learn which providers have saved keys (receives only provider name and key prefix, never the full key)
+- When making AI requests, the server proxy fetches and decrypts the key from the database — the client sends only an auth token and provider name
+- If server-side storage fails, keys are kept in browser memory for the session as a local fallback
 
 **Realtime subscription:**
 - After initial sync, subscribes to `postgres_changes` on `user_data` table
@@ -218,16 +218,16 @@ clearAllUserData() → cache.clear() → idbClearUser() → supabase.delete(all 
 - On CHANNEL_ERROR, auto-retry subscription after 3 seconds
 
 **Real-time API key sync across devices:**
-- API key changes in SettingsContext call `triggerSync()` for immediate push to Supabase
-- Other devices receive the update via Supabase Realtime `storage-remote-update` CustomEvent
-- SettingsContext listens for `storage-remote-update` and auto-merges remote API keys into local state
-- Encryption uses userId-derived key (`ai-wb-enc-{userId}-v3`), making it cross-device portable (prefix `enc3:`)
+- API key changes call `/api/keys/save` which stores the encrypted key server-side in `user_api_keys`
+- Other devices automatically have access to the latest keys because the server proxy fetches keys from the database on each request
+- No client-side key sync is needed — the server is the single source of truth for API keys
 
 **What syncs to Supabase:**
 
 | Data | Namespace | Syncs |
 |------|-----------|-------|
-| Settings (incl. API keys) | `settings` | Yes — immediate trigger |
+| Settings (excl. API keys) | `settings` | Yes — immediate trigger |
+| API keys | `user_api_keys` table (dedicated) | Yes — server-side only, via `/api/keys/save` |
 | Conversations | `conv-messages:{id}` | Yes — debounced |
 | Branch data | `conv-branches:{id}` | Yes — debounced |
 | Conversation memory | `conv-memory:{id}` | Yes — debounced |
@@ -530,7 +530,7 @@ An AI-powered interactive widget builder (`WidgetsShowcase.tsx`) where users cha
 - Users describe desired widgets in natural language
 - AI generates HTML/JS widgets with charts, tables, and trackers
 - Generated widgets render in the Artifacts panel as live previews
-- Uses the same core `callAI()` infrastructure as the main chat
+- Imports the shared `callAI()` from `@/lib/aiClient` (no longer has its own duplicate implementation)
 - Message history persisted separately from main chat
 
 ### 3.10 User Profile & Personalization
@@ -681,17 +681,15 @@ In Settings > Appearance, clicking [Edit] next to font size opens a fixed-size p
 | **Root font size** | Sets `font-size` on `<html>` element |
 | **Sidebar scaling** | Sidebar text uses `rem` units, so it scales with the root font size |
 
-### 3.20 OpenRouter CORS Fix
+### 3.20 Server-Side API Proxy
 
-OpenRouter blocks direct browser requests (CORS). The solution uses a selective proxy strategy.
+All AI provider requests route through the `/api/ai/chat` server proxy for security and key management.
 
 | Provider | Routing | Reason |
 |----------|---------|--------|
-| **OpenRouter** | Always via `/api/ai/chat` proxy | CORS blocked from browser |
-| **All other providers** | Direct API call from browser | Faster, no timeout limit |
-| **Fallback** | If any direct call fails with CORS error, auto-retry via proxy | Resilience |
+| **All providers** | Always via `/api/ai/chat` proxy | API keys injected server-side; keys never reach the browser |
 
-Custom OpenRouter models registered via Settings also route through the proxy.
+The client sends a Supabase auth token and provider name. The proxy fetches the encrypted key from the `user_api_keys` table, decrypts it with AES-256-GCM, and injects the correct auth header before forwarding to the AI provider. A local fallback mode (sending keys via legacy headers) activates only when server-side key storage is unavailable.
 
 ### 3.21 Custom Model UI Improvements
 
@@ -1258,7 +1256,7 @@ ai-workbench/
 │       │       ├── idb.ts          # IndexedDB operations (per-user database)
 │       │       ├── sync-queue.ts   # Batched write queue for Supabase sync
 │       │       ├── supabase-sync.ts # Cloud read/write via Supabase tables
-│       │       ├── encryption.ts   # API key obfuscation (XOR + AES-256-GCM)
+│       │       ├── encryption.ts   # Legacy encryption utilities (API keys now stored server-side)
 │       │       ├── migration.ts    # Legacy localStorage → IndexedDB migration
 │       │       ├── conflict-resolver.ts # Sync conflict resolution
 │       │       └── types.ts        # Storage types and namespace-to-table routing
