@@ -638,18 +638,39 @@ export default function ArtifactsPanel({
                     title="Preview"
                   />
                 </>
-              ) : (
-                <>
-                  <p className="text-xs text-white/40 mb-3">
-                    {lang === "en"
-                      ? "Preview is available for HTML/CSS artifacts. For other languages, use the code view."
-                      : "預覽功能適用於 HTML/CSS artifacts。其他語言請使用程式碼檢視。"}
-                  </p>
-                  <pre className="text-xs text-white/60 font-mono whitespace-pre-wrap overflow-auto max-h-[400px] p-3 rounded-lg bg-[oklch(0.08_0.015_265)] border border-white/8">
-                    {current?.code}
-                  </pre>
-                </>
-              )}
+              ) : (() => {
+                // Auto-detect markdown content even if language tag isn't "markdown"
+                const code = current?.code || ""
+                const mdSignals = (code.match(/^#{1,6}\s/gm) || []).length +
+                  (code.match(/^\s*[-*]\s/gm) || []).length +
+                  (code.match(/\[.+?\]\(.+?\)/g) || []).length +
+                  (code.match(/\*\*.+?\*\*/g) || []).length
+                const looksLikeMarkdown = mdSignals >= 2
+
+                return looksLikeMarkdown ? (
+                  <div className="prose prose-invert prose-sm max-w-none
+                    prose-headings:text-white/90 prose-headings:font-semibold
+                    prose-p:text-white/75 prose-p:leading-relaxed
+                    prose-code:text-blue-300 prose-code:bg-blue-900/30 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
+                    prose-strong:text-white/90
+                    prose-blockquote:border-l-blue-500/50 prose-blockquote:text-white/60
+                    prose-li:text-white/75
+                  ">
+                    <Streamdown>{code}</Streamdown>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-white/40 mb-3">
+                      {lang === "en"
+                        ? "Preview is available for HTML/CSS/Markdown artifacts. For other languages, use the code view."
+                        : "預覽功能適用於 HTML/CSS/Markdown artifacts。其他語言請使用程式碼檢視。"}
+                    </p>
+                    <pre className="text-xs text-white/60 font-mono whitespace-pre-wrap overflow-auto max-h-[400px] p-3 rounded-lg bg-[oklch(0.08_0.015_265)] border border-white/8">
+                      {current?.code}
+                    </pre>
+                  </>
+                )
+              })()}
             </div>
           </div>
         )}

@@ -673,8 +673,16 @@ function extractAndDispatchCodeBlocks(
   let match
   const pending: { code: string; language: string; source: string; filename?: string }[] = []
   while ((match = codeBlockRegex.exec(content)) !== null) {
-    const language = match[1] || "text"
+    let language = match[1] || "text"
     const code = match[2].trim()
+    // Auto-detect markdown content when no language tag is specified
+    if (language === "text" || language === "markdown" || language === "md") {
+      const mdSignals = (code.match(/^#{1,6}\s/gm) || []).length +
+        (code.match(/^\s*[-*]\s/gm) || []).length +
+        (code.match(/\[.+?\]\(.+?\)/g) || []).length +
+        (code.match(/\*\*.+?\*\*/g) || []).length
+      if (mdSignals >= 2) language = "markdown"
+    }
     // Only dispatch substantial code blocks (not short inline examples)
     if (code.length > 50 && code.split("\n").length > 3) {
       pending.push({ code, language, source })
