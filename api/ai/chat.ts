@@ -78,6 +78,7 @@ async function getStoredApiKey(userId: string, provider: string): Promise<string
         .eq("user_id", userId)
         .eq("provider", p)
         .single()
+      console.log(`[getStoredApiKey] userId=${userId.slice(0,8)}… provider=${p} found=${!!data} error=${error?.message || "none"}`)
       if (!error && data) {
         const ciphertext = Buffer.from(data.encrypted_key, "base64")
         const iv = Buffer.from(data.iv, "base64")
@@ -85,7 +86,10 @@ async function getStoredApiKey(userId: string, provider: string): Promise<string
       }
     }
     return null
-  } catch { return null }
+  } catch (err: any) {
+    console.error("[getStoredApiKey] Exception:", err.message)
+    return null
+  }
 }
 
 function buildProviderHeaders(provider: string, apiKey: string): Record<string, string> {

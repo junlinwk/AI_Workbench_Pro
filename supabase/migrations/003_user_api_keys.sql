@@ -2,14 +2,17 @@
 -- Stores encrypted API keys per user per provider (AES-256-GCM)
 -- Keys are NEVER returned to the client; only the server proxy reads them.
 
-CREATE TABLE IF NOT EXISTS user_api_keys (
-  user_id     UUID    NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  provider    TEXT    NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 50),
-  encrypted_key BYTEA NOT NULL,
-  iv          BYTEA   NOT NULL,
-  key_prefix  TEXT,            -- e.g. "sk-a…" for UI display
-  created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ DEFAULT now(),
+-- Drop if exists (for re-running)
+DROP TABLE IF EXISTS user_api_keys CASCADE;
+
+CREATE TABLE user_api_keys (
+  user_id       UUID    NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  provider      TEXT    NOT NULL CHECK (char_length(provider) BETWEEN 1 AND 50),
+  encrypted_key TEXT    NOT NULL,   -- base64-encoded AES-256-GCM ciphertext + auth tag
+  iv            TEXT    NOT NULL,   -- base64-encoded 12-byte IV
+  key_prefix    TEXT,               -- e.g. "sk-a…" for UI display
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  updated_at    TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (user_id, provider)
 );
 

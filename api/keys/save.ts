@@ -83,9 +83,18 @@ export default async function handler(req: any, res: any) {
       )
 
     if (error) {
-      console.error("[keys/save] DB error:", error.message)
-      return res.status(500).json({ error: "Failed to save key" })
+      console.error("[keys/save] DB error:", error.message, error.details, error.hint)
+      return res.status(500).json({ error: "Failed to save key", detail: error.message })
     }
+
+    // Verify the key was saved
+    const { data: verify } = await supabase
+      .from("user_api_keys")
+      .select("provider, key_prefix")
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .single()
+    console.log("[keys/save] Verified:", verify ? `${verify.provider} = ${verify.key_prefix}` : "NOT FOUND")
 
     return res.status(200).json({ success: true, provider, prefix })
   } catch (err: any) {
