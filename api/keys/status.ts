@@ -3,7 +3,26 @@
  * Returns: { keys: [{ provider, prefix, updatedAt }] }
  * NEVER returns the actual key values.
  */
-import { getAuthenticatedUserId, getServiceSupabase } from "../_lib/auth"
+import { createClient } from "@supabase/supabase-js"
+
+function getServiceSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+}
+
+async function getAuthenticatedUserId(authHeader: string | string[] | undefined): Promise<string | null> {
+  if (!authHeader || typeof authHeader !== "string") return null
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim()
+  if (!token) return null
+  try {
+    const supabase = getServiceSupabase()
+    const { data, error } = await (supabase.auth as any).getUser(token)
+    if (error || !data?.user) return null
+    return data.user.id
+  } catch { return null }
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {

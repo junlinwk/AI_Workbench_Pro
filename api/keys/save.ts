@@ -4,9 +4,42 @@
  * Returns: { success: true, provider, prefix }
  * The raw key is NEVER returned.
  */
-import { getAuthenticatedUserId, getServiceSupabase } from "../_lib/auth"
-import { encryptApiKey } from "../_lib/encryption"
+import { createClient } from "@supabase/supabase-js"
+import { createCipheriv, createHash, randomBytes } from "crypto"
 
+// ── Inline auth helper ──
+function getServiceSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+}
+
+async function getAuthenticatedUserId(authHeader: string | string[] | undefined): Promise<string | null> {
+  if (!authHeader || typeof authHeader !== "string") return null
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim()
+  if (!token) return null
+  try {
+    const supabase = getServiceSupabase()
+    const { data, error } = await (supabase.auth as any).getUser(token)
+    if (error || !data?.user) return null
+    return data.user.id
+  } catch { return null }
+}
+
+// ── Inline encryption helper ──
+function encryptApiKey(plaintext: string): { ciphertext: Buffer; iv: Buffer } {
+  const secret = process.env.API_KEY_ENCRYPTION_SECRET
+  if (!secret) throw new Error("API_KEY_ENCRYPTION_SECRET is not set")
+  const key = createHash("sha256").update(secret).digest()
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", key, iv)
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return { ciphertext: Buffer.concat([encrypted, tag]), iv }
+}
+
+// ── Valid providers ──
 const VALID_PROVIDERS = new Set([
   "openai", "anthropic", "google", "deepseek",
   "xai", "groq", "meta", "mistral", "openrouter",
@@ -57,6 +90,6 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ success: true, provider, prefix })
   } catch (err: any) {
     console.error("[keys/save] Error:", err.message)
-    return res.status(500).json({ error: "Internal error" })
+    return res.status(500).json({ error: err.message || "Internal error" })
   }
 }

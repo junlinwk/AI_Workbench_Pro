@@ -1,14 +1,40 @@
 // ─── AI Chat Proxy — Server-side key injection ─────────────────────────────
-//
-// New flow: client sends { endpoint, body, provider } — NO raw API keys.
-// The proxy fetches the encrypted key from the DB, decrypts it, and injects
-// the correct auth header before forwarding to the AI provider.
-//
-// Backward compat: if `headers` with an auth key is present (old client),
-// it is still accepted but will be removed in a future version.
+import { createClient } from "@supabase/supabase-js"
+import { createDecipheriv, createHash } from "crypto"
 
-import { getAuthenticatedUserId, getServiceSupabase } from "../_lib/auth"
-import { decryptApiKey } from "../_lib/encryption"
+// ── Inline helpers (avoid cross-file import issues on Vercel ESM) ──
+
+function getServiceSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
+}
+
+async function getAuthenticatedUserId(authHeader: string | string[] | undefined): Promise<string | null> {
+  if (!authHeader || typeof authHeader !== "string") return null
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim()
+  if (!token) return null
+  try {
+    const supabase = getServiceSupabase()
+    const { data, error } = await (supabase.auth as any).getUser(token)
+    if (error || !data?.user) return null
+    return data.user.id
+  } catch { return null }
+}
+
+function decryptApiKey(ciphertext: Buffer, iv: Buffer): string {
+  const secret = process.env.API_KEY_ENCRYPTION_SECRET
+  if (!secret) throw new Error("API_KEY_ENCRYPTION_SECRET is not set")
+  const key = createHash("sha256").update(secret).digest()
+  const encrypted = ciphertext.subarray(0, ciphertext.length - 16)
+  const tag = ciphertext.subarray(ciphertext.length - 16)
+  const decipher = createDecipheriv("aes-256-gcm", key, iv)
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8")
+}
+
+// ── Constants ──
 
 const ALLOWED_PREFIXES = [
   "https://api.openai.com/",
@@ -41,57 +67,37 @@ function validateUrl(raw: string): URL | null {
   } catch { return null }
 }
 
-/**
- * Fetch the user's API key for a given provider from the DB, decrypt it.
- */
 async function getStoredApiKey(userId: string, provider: string): Promise<string | null> {
   try {
     const supabase = getServiceSupabase()
-    const { data, error } = await supabase
-      .from("user_api_keys")
-      .select("encrypted_key, iv")
-      .eq("user_id", userId)
-      .eq("provider", provider)
-      .single()
-
-    if (error || !data) return null
-    const ciphertext = Buffer.from(data.encrypted_key, "base64")
-    const iv = Buffer.from(data.iv, "base64")
-    return decryptApiKey(ciphertext, iv)
-  } catch {
+    const lookupProviders = provider === "meta" ? ["groq", "meta"] : provider === "groq" ? ["groq", "meta"] : [provider]
+    for (const p of lookupProviders) {
+      const { data, error } = await supabase
+        .from("user_api_keys")
+        .select("encrypted_key, iv")
+        .eq("user_id", userId)
+        .eq("provider", p)
+        .single()
+      if (!error && data) {
+        const ciphertext = Buffer.from(data.encrypted_key, "base64")
+        const iv = Buffer.from(data.iv, "base64")
+        return decryptApiKey(ciphertext, iv)
+      }
+    }
     return null
-  }
+  } catch { return null }
 }
 
-/**
- * Build the correct auth headers for each AI provider.
- */
 function buildProviderHeaders(provider: string, apiKey: string): Record<string, string> {
   switch (provider) {
     case "anthropic":
-      return {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      }
+      return { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
     case "google":
-      return {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      }
+      return { "Content-Type": "application/json", "x-goog-api-key": apiKey }
     case "openrouter":
-      return {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer": "https://ai-workbench.app",
-        "X-OpenRouter-Title": "AI Workbench",
-      }
+      return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": "https://ai-workbench.app", "X-OpenRouter-Title": "AI Workbench" }
     default:
-      // OpenAI, DeepSeek, xAI, Groq, Meta, Mistral — all use Bearer
-      return {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      }
+      return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }
   }
 }
 
@@ -124,24 +130,21 @@ export default async function handler(req: any, res: any) {
 
   let finalHeaders: Record<string, string> = {}
 
-  // ── New flow: provider-based, fetch key from DB ──
+  // New flow: provider-based, fetch key from DB
   if (provider && typeof provider === "string") {
     const userId = await getAuthenticatedUserId(req.headers.authorization)
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized — login required for server-side keys" })
     }
 
-    // Groq and Meta share the same key
-    const lookupProvider = provider === "meta" ? "groq" : provider
-
-    const apiKey = await getStoredApiKey(userId, lookupProvider)
+    const apiKey = await getStoredApiKey(userId, provider)
     if (!apiKey) {
       return res.status(404).json({ error: `No API key found for provider: ${provider}` })
     }
 
     finalHeaders = buildProviderHeaders(provider, apiKey)
   }
-  // ── Legacy flow: client sends raw headers (backward compat) ──
+  // Legacy flow: client sends raw headers (backward compat)
   else if (fwdHeaders && typeof fwdHeaders === "object") {
     for (const [k, v] of Object.entries(fwdHeaders)) {
       if (typeof v === "string" && !BLOCKED.has(k.toLowerCase())) {

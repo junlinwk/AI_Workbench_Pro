@@ -922,7 +922,7 @@ export default function ChatInterface({
   userId: userIdProp,
   folderPrompt,
 }: ChatInterfaceProps) {
-  const { settings, hasApiKey } = useSettings()
+  const { settings, hasApiKey, getApiKey } = useSettings()
   const { user } = useAuth()
   const lang = settings.language
 
@@ -1157,6 +1157,8 @@ export default function ChatInterface({
     ? MODEL_PROVIDERS.find((p) => p.id === currentModel.providerId)
     : null
   const canSend = hasApiKey(currentModel?.providerId || "")
+  // Fallback key for legacy proxy mode (when server-side storage unavailable)
+  const fallbackKey = currentModel ? getApiKey(currentModel.providerId) : undefined
   // Whether Groq/Meta key is available for voice features (STT/TTS)
   const hasGroqKey = hasApiKey("groq") || hasApiKey("meta")
 
@@ -1204,11 +1206,19 @@ export default function ChatInterface({
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data)
       }
+      const recordStartTime = Date.now()
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
         stopAudioMonitor()
         const blob = new Blob(chunks, { type: recorder.mimeType })
         setIsRecording(false)
+
+        // Skip transcription if recording is too short (< 500ms) — Whisper hallucinates on silence
+        const durationMs = Date.now() - recordStartTime
+        if (durationMs < 500 || blob.size < 1000) {
+          setLiveTranscript("")
+          return
+        }
 
         // Transcribe
         setLiveTranscript(lang === "en" ? "Transcribing..." : "轉錄中...")
@@ -1244,7 +1254,7 @@ export default function ChatInterface({
         setTimeout(() => setLiveTranscript(""), 3000)
       }
 
-      recorder.start()
+      recorder.start(250) // collect data every 250ms for reliable chunks
       mediaRecorderRef.current = recorder
       setIsRecording(true)
       setLiveTranscript(lang === "en" ? "Listening..." : "聆聽中...")
@@ -1501,7 +1511,7 @@ export default function ChatInterface({
           const classifyResult = await callAI(
             [{ role: "user", content: `Does this user message need real-time web information to answer properly? Answer only "yes" or "no".\n\nMessage: "${trimmed}"` }],
             settings.selectedModelId,
-            undefined,
+            fallbackKey,
             0,
             10,
             "Output only yes or no.",
@@ -1520,7 +1530,7 @@ export default function ChatInterface({
         const searchQueries = await callAI(
           [{ role: "user", content: searchQueryPrompt }],
           settings.selectedModelId,
-          undefined,
+          fallbackKey,
           0.3,
           100,
           "Output only search queries, one per line. No numbering, no quotes, no explanation.",
@@ -1626,7 +1636,7 @@ export default function ChatInterface({
       const aiPromise = callAI(
         chatHistory,
         settings.selectedModelId,
-        undefined,
+        fallbackKey,
         effectiveTemperature,
         settings.maxTokens,
         fullSystemPrompt,
@@ -1664,8 +1674,8 @@ export default function ChatInterface({
       // Extract code blocks and send to Artifacts panel
       extractAndDispatchCodeBlocks(response)
 
-      // Voice/gesture mode: speak the response aloud
-      if ((voiceMode || handGestureMode) && hasGroqKey) {
+      // Voice/gesture mode: speak the response aloud (falls back to browser TTS if no Groq key)
+      if (voiceMode || handGestureMode) {
         textToSpeech(response.slice(0, 2000), undefined, settings.voiceLanguage)
           .then(() => {
             if (voiceMode) startRecording()
@@ -1680,7 +1690,7 @@ export default function ChatInterface({
         aiMsg,
         userMsg,
         settings.selectedModelId,
-        undefined,
+        fallbackKey,
         callAI,
         activeBranchId,
       ).catch(() => {})
@@ -1692,7 +1702,7 @@ export default function ChatInterface({
           const title = await callAI(
             [{ role: "user", content: titlePrompt }],
             settings.selectedModelId,
-            undefined,
+            fallbackKey,
             0,
             30,
             "Output only a short title. No quotes. No explanation.",
@@ -1904,7 +1914,7 @@ export default function ChatInterface({
       const response = await callAI(
         chatHistory,
         settings.selectedModelId,
-        undefined,
+        fallbackKey,
         regenTemperature,
         settings.maxTokens,
         fullSystemPrompt,

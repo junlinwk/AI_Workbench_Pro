@@ -19,7 +19,8 @@
       "Bash(npm search:*)",
       "Bash(pnpm:*)",
       "WebSearch",
-      "Bash(python3 -c \"from PIL import Image; img = Image.open\\(''docs/media/logo-banner.png''\\); print\\(f''{img.width}x{img.height}''\\)\")"
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\(''docs/media/logo-banner.png''\\); print\\(f''{img.width}x{img.height}''\\)\")",
+      "Bash(node:*)"
     ]
   }
 }

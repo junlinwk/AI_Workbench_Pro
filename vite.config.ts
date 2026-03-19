@@ -484,7 +484,9 @@ function vitePluginSearchProxy(): Plugin {
           if (!groqKey) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "No Groq key" })); return; }
           const buffer = Buffer.from(body.audio, "base64");
           const boundary = "----AudioBoundary" + Date.now();
-          const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="recording.webm"\r\nContent-Type: audio/webm\r\n\r\n`), buffer, Buffer.from("\r\n"), Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3-turbo\r\n`), Buffer.from(`--${boundary}--\r\n`)];
+          const parts: Buffer[] = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="recording.webm"\r\nContent-Type: audio/webm\r\n\r\n`), buffer, Buffer.from("\r\n"), Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3-turbo\r\n`)];
+          if (body.language && body.language !== "auto") { parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${body.language}\r\n`)); }
+          parts.push(Buffer.from(`--${boundary}--\r\n`));
           const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: Buffer.concat(parts) });
           if (!groqRes.ok) { const err = await groqRes.text().catch(() => ""); res.writeHead(groqRes.status, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: err.slice(0, 200) })); return; }
           const data = await groqRes.json();

@@ -258,10 +258,10 @@ async function fetchKeyStatus(): Promise<SavedKeyInfo[]> {
   }
 }
 
-async function saveKeyToServer(provider: string, key: string): Promise<{ success: boolean; prefix?: string }> {
+async function saveKeyToServer(provider: string, key: string): Promise<{ success: boolean; prefix?: string; error?: string }> {
   try {
     const authToken = await getAuthToken()
-    if (!authToken) return { success: false }
+    if (!authToken) return { success: false, error: "No auth token" }
     const res = await fetch("/api/keys/save", {
       method: "POST",
       headers: {
@@ -270,11 +270,16 @@ async function saveKeyToServer(provider: string, key: string): Promise<{ success
       },
       body: JSON.stringify({ provider, key }),
     })
-    if (!res.ok) return { success: false }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.warn("[keys/save] Server error:", res.status, err)
+      return { success: false, error: err.error || `HTTP ${res.status}` }
+    }
     const data = await res.json()
     return { success: true, prefix: data.prefix }
-  } catch {
-    return { success: false }
+  } catch (err) {
+    console.warn("[keys/save] Network error:", err)
+    return { success: false, error: "Network error" }
   }
 }
 
@@ -295,6 +300,12 @@ async function deleteKeyFromServer(provider: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Local fallback: when server-side key storage is unavailable (env vars not set),
+ * keys are kept in memory only (lost on page refresh, but functional during session).
+ */
+const localKeyFallback = new Map<string, string>()
 
 /* ------------------------------------------------------------------ */
 /*  Context                                                            */
@@ -575,13 +586,27 @@ export function SettingsProvider({
     setSettings({ ...DEFAULT_SETTINGS })
   }, [])
 
-  // Save API key to server (encrypted)
+  // Save API key to server (encrypted), with local fallback
   const setApiKey = useCallback(
     async (provider: string, key: string) => {
       const result = await saveKeyToServer(provider, key)
       if (result.success) {
         await refreshKeyStatus()
+        return
       }
+      // Server-side storage failed — fall back to local-only mode
+      // This keeps the app functional when server env vars aren't configured
+      console.warn("[setApiKey] Server save failed, using local fallback:", result.error)
+      setSavedKeys((prev) => {
+        const existing = prev.filter((k) => k.provider !== provider)
+        return [...existing, { provider, prefix: key.slice(0, 4) + "…", updatedAt: new Date().toISOString() }]
+      })
+      setSettings((prev) => ({
+        ...prev,
+        savedKeyProviders: [...new Set([...prev.savedKeyProviders, provider])],
+      }))
+      // Store in memory for the proxy fallback (legacy headers mode)
+      localKeyFallback.set(provider, key)
     },
     [refreshKeyStatus],
   )
@@ -597,15 +622,16 @@ export function SettingsProvider({
     [refreshKeyStatus],
   )
 
-  // getApiKey now returns undefined — keys are server-side only
-  // This is kept for backward compat; callers should use hasApiKey() instead.
+  // getApiKey: returns local fallback key if available, otherwise placeholder for server-stored.
   const getApiKey = useCallback(
     (provider: string): string | undefined => {
-      // Return a placeholder so existing code that checks truthiness still works,
-      // but the actual key value is never available client-side.
+      // Check local fallback first (when server storage is unavailable)
+      if (localKeyFallback.has(provider)) return localKeyFallback.get(provider)
+      if (provider === "groq" && localKeyFallback.has("meta")) return localKeyFallback.get("meta")
+      if (provider === "meta" && localKeyFallback.has("groq")) return localKeyFallback.get("groq")
+      // Server-stored key — return placeholder (actual key is on server)
       const providers = savedKeys.map((k) => k.provider)
       if (providers.includes(provider)) return "[server-stored]"
-      // Groq and Meta share the same key
       if (provider === "groq" && providers.includes("meta")) return "[server-stored]"
       if (provider === "meta" && providers.includes("groq")) return "[server-stored]"
       return undefined

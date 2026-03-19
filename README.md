@@ -43,10 +43,6 @@
 
 ## Demo Videos / 功能展示
 
-> Upload demo videos to `docs/media/demos/` and they will appear here.
->
-> 將展示影片上傳至 `docs/media/demos/`，即可在此顯示。
-
 </div>
 
 <table>

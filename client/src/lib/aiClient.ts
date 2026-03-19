@@ -97,10 +97,24 @@ function getTextContent(content: MessageContent): string {
     .join("\n")
 }
 
+/** Build legacy auth headers for fallback mode (when server-side key storage is unavailable) */
+function buildLegacyHeaders(providerId: string, apiKey: string, endpoint: string): Record<string, string> {
+  switch (providerId) {
+    case "anthropic":
+      return { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+    case "google":
+      return { "Content-Type": "application/json", "x-goog-api-key": apiKey }
+    case "openrouter":
+      return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, "HTTP-Referer": window.location.origin, "X-OpenRouter-Title": "AI Workbench" }
+    default:
+      return { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }
+  }
+}
+
 export async function callAI(
   messages: ChatMessage[],
   modelId: string,
-  _apiKeyUnused: string | undefined, // kept for backward compat, ignored
+  fallbackApiKey: string | undefined, // used as legacy fallback when server-side keys unavailable
   temperature: number,
   maxTokens: number,
   systemPrompt: string,
@@ -269,6 +283,29 @@ export async function callAI(
       )
     }
     throw err
+  }
+
+  // If server-side key lookup failed but we have a local fallback key,
+  // retry with legacy headers mode (key sent directly through proxy)
+  if ((res.status === 401 || res.status === 404) && fallbackApiKey && fallbackApiKey !== "[server-stored]") {
+    const legacyHeaders = buildLegacyHeaders(model.providerId, fallbackApiKey, endpoint)
+    try {
+      res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          body,
+          headers: legacyHeaders,
+        }),
+        signal,
+      })
+    } catch (err) {
+      if (err instanceof TypeError) {
+        throw new Error("Network error — please check your internet connection and try again.")
+      }
+      throw err
+    }
   }
 
   if (res.status === 401) {
