@@ -1,8 +1,16 @@
 <div align="center">
 
-# AI Workbench
 
-**A production-ready, multi-provider AI chat platform with glassmorphism UI**
+# AI Workbench
+<img src="docs/media/logo-banner.png" alt="AI Workbench" width="160" />
+
+<br>
+
+**A production-ready, multi-provider AI chat platform**
+
+**可部署的多模型 AI 對話平台**
+
+<br/>
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev/)
@@ -11,9 +19,147 @@
 [![Supabase](https://img.shields.io/badge/Supabase-Auth_+_DB-3ecf8e?logo=supabase&logoColor=white)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+<br/>
+
 [English](#english) | [繁體中文](#繁體中文)
 
+<br/>
+
+## Demo Link
+
+<a href="https://ai-workbench-pro.vercel.app/">
+  <img src="https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-ai--workbench--pro.vercel.app-7c3aed?style=for-the-badge&labelColor=1e1b4b" alt="Live Demo" />
+</a>
+
+<br/><br/>
+
 </div>
+
+<!-- ============================================================================ -->
+<!-- DEMO VIDEO GALLERY -->
+<!-- ============================================================================ -->
+
+<div align="center">
+
+## Demo Videos / 功能展示
+
+> Upload demo videos to `docs/media/demos/` and they will appear here.
+>
+> 將展示影片上傳至 `docs/media/demos/`，即可在此顯示。
+
+</div>
+
+<table>
+<tr>
+<td width="50%" align="center">
+
+**Multi-Provider AI Chat**<br/>多模型 AI 對話
+
+<!--
+<video src="docs/media/demos/01-chat.mp4" width="100%" controls></video>
+-->
+
+</td>
+<td width="50%" align="center">
+
+**Artifacts Panel**<br/>程式碼即時預覽
+
+<!--
+<video src="docs/media/demos/02-artifacts.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-02_Artifacts-1e293b?style=flat-square&labelColor=0f172a" alt="02" />
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+**Conversation Branching**<br/>對話分支
+
+<!--
+<video src="docs/media/demos/03-branching.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-03_Branching-1e293b?style=flat-square&labelColor=0f172a" alt="03" />
+
+</td>
+<td align="center">
+
+**Task DAG Editor**<br/>視覺化任務圖編輯器
+
+<!--
+<video src="docs/media/demos/04-task-dag.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-04_Task_DAG-1e293b?style=flat-square&labelColor=0f172a" alt="04" />
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+**Memory Map**<br/>知識圖譜
+
+<!--
+<video src="docs/media/demos/05-memory-map.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-05_Memory_Map-1e293b?style=flat-square&labelColor=0f172a" alt="05" />
+
+</td>
+<td align="center">
+
+**Context Pinning**<br/>上下文釘選
+
+<!--
+<video src="docs/media/demos/06-context-pin.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-06_Context_Pin-1e293b?style=flat-square&labelColor=0f172a" alt="06" />
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+**Voice & Gesture Mode**<br/>語音 + 手勢操控
+
+<!--
+<video src="docs/media/demos/07-voice-gesture.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-07_Voice_Gesture-1e293b?style=flat-square&labelColor=0f172a" alt="07" />
+
+</td>
+<td align="center">
+
+**Widget Builder**<br/>AI Widget 生成器
+
+<!--
+<video src="docs/media/demos/08-widgets.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-08_Widgets-1e293b?style=flat-square&labelColor=0f172a" alt="08" />
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
+**Notepad & Search**<br/>記事本 + 語義搜尋
+
+<!--
+<video src="docs/media/demos/09-notepad-search.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-09_Notepad_Search-1e293b?style=flat-square&labelColor=0f172a" alt="09" />
+
+</td>
+<td align="center">
+
+**Settings & Security**<br/>設定 + 安全機制
+
+<!--
+<video src="docs/media/demos/10-settings-security.mp4" width="100%" controls></video>
+-->
+<img src="https://img.shields.io/badge/Coming_Soon-10_Settings_Security-1e293b?style=flat-square&labelColor=0f172a" alt="10" />
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -319,6 +465,11 @@ If you don't configure Supabase, the app falls back to local-only mode:
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ...
 
+# ─── Server-side API key encryption (required) ──────────────
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...      # From Supabase → Settings → API
+API_KEY_ENCRYPTION_SECRET=...         # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
 # ─── Admin ───────────────────────────────────────────────────
 VITE_ADMIN_EMAIL=admin@example.com    # Gets /admin access
 
@@ -353,6 +504,7 @@ PORT=3000                             # Server port
 2. Run migrations in **SQL Editor**:
    - `supabase/migrations/001_initial_schema.sql`
    - `supabase/migrations/002_membership_tier.sql`
+   - `supabase/migrations/003_user_api_keys.sql`
 3. Enable Google OAuth in **Authentication** → **Providers** → **Google**
 4. Enable Realtime for `user_data` table in **Database** → **Replication**
 5. Copy **Project URL** and **anon key** from **Project Settings** → **API**
@@ -374,7 +526,7 @@ PORT=3000                             # Server port
 | **xAI** | Grok family | `Authorization: Bearer` |
 | **OpenRouter** | Any model via aggregation | `Authorization: Bearer` |
 
-All API keys are stored **client-side only** and proxied through the server without being stored server-side.
+All API keys are stored **server-side only** — encrypted with AES-256-GCM in Supabase. The client never sees or stores raw key values.
 
 ---
 
@@ -389,7 +541,7 @@ All API keys are stored **client-side only** and proxied through the server with
 | **API proxy** | Whitelist-only AI endpoints, dangerous header stripping |
 | **Rate limiting** | Per-IP limits on all API routes |
 | **Data isolation** | Supabase RLS on all tables, per-user IndexedDB databases |
-| **API key storage** | XOR obfuscation locally, AES-256-GCM on Edge Functions |
+| **API key storage** | Server-side AES-256-GCM encryption in Supabase — keys never reach the client |
 | **Disposable emails** | 40+ temp mail domains blocked at registration |
 | **Chat/folder locks** | SHA-256 hashed password, session-based unlock, admin bypass |
 
@@ -426,8 +578,16 @@ All API keys are stored **client-side only** and proxied through the server with
 
 ```
 ├── api/                          # Vercel Serverless Functions
-│   ├── _lib/security.ts          #   Shared security utilities
-│   ├── ai/chat.ts                #   AI API proxy
+│   ├── _lib/
+│   │   ├── security.ts           #   Shared security utilities
+│   │   ├── auth.ts               #   Server-side Supabase JWT validation
+│   │   └── encryption.ts         #   AES-256-GCM API key encryption
+│   ├── ai/chat.ts                #   AI API proxy (server-side key injection)
+│   ├── audio/speech.ts           #   TTS proxy (Groq)
+│   ├── audio/transcribe.ts       #   STT proxy (Groq Whisper)
+│   ├── keys/save.ts              #   Save encrypted API key
+│   ├── keys/delete.ts            #   Delete API key
+│   ├── keys/status.ts            #   List saved key providers
 │   ├── fetch-url.ts              #   URL content extraction
 │   └── search.ts                 #   Web search proxy
 ├── client/
@@ -496,7 +656,19 @@ MIT
 
 <div align="center">
 
+<img src="docs/media/logo-banner.png" alt="AI Workbench" width="160" />
+
+<br/>
+
 [English](#english) | **繁體中文**
+
+<br/>
+
+<a href="https://ai-workbench-pro.vercel.app/">
+  <img src="https://img.shields.io/badge/%F0%9F%9A%80%20%E7%B7%9A%E4%B8%8A%E5%B1%95%E7%A4%BA-ai--workbench--pro.vercel.app-7c3aed?style=for-the-badge&labelColor=1e1b4b" alt="線上展示" />
+</a>
+
+<br/><br/>
 
 </div>
 
@@ -791,6 +963,11 @@ pnpm dev
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ...
 
+# ─── 伺服器端 API key 加密（必要） ────────────────────────
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...      # 從 Supabase → Settings → API 取得
+API_KEY_ENCRYPTION_SECRET=...         # 產生方式：node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
 # ─── 管理員 ──────────────────────────────────────────────
 VITE_ADMIN_EMAIL=admin@example.com    # 取得 /admin 頁面權限
 
@@ -825,6 +1002,7 @@ PORT=3000                             # 伺服器 port
 2. 在 **SQL Editor** 執行 migration：
    - `supabase/migrations/001_initial_schema.sql`
    - `supabase/migrations/002_membership_tier.sql`
+   - `supabase/migrations/003_user_api_keys.sql`
 3. 在 **Authentication** → **Providers** → **Google** 啟用 Google OAuth
 4. 在 **Database** → **Replication** 啟用 `user_data` 資料表的 Realtime
 5. 從 **Project Settings** → **API** 複製 **Project URL** 和 **anon key**
@@ -846,7 +1024,7 @@ PORT=3000                             # 伺服器 port
 | **xAI** | Grok 系列 | `Authorization: Bearer` |
 | **OpenRouter** | 透過聚合存取任何模型 | `Authorization: Bearer` |
 
-所有 API key 僅存於**用戶端**，透過伺服器代理轉發，伺服器端不儲存。
+所有 API key 僅存於**伺服器端** — 以 AES-256-GCM 加密存儲於 Supabase，客戶端永遠不接觸原始金鑰。
 
 ---
 
@@ -861,7 +1039,7 @@ PORT=3000                             # 伺服器 port
 | **API 代理** | 僅白名單 AI 端點、移除危險 header |
 | **速率限制** | 所有 API 路由的 per-IP 限制 |
 | **資料隔離** | Supabase RLS 保護所有資料表、per-user IndexedDB 資料庫 |
-| **API key 儲存** | 本地 XOR 混淆、Edge Function 上 AES-256-GCM |
+| **API key 儲存** | 伺服器端 AES-256-GCM 加密存於 Supabase — 金鑰永不傳至客戶端 |
 | **拋棄式信箱** | 註冊時封鎖 40+ 暫時信箱域名 |
 | **對話/資料夾鎖定** | SHA-256 雜湊密碼、工作階段解鎖、管理員略過 |
 
