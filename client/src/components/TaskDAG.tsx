@@ -127,7 +127,7 @@ function createEntryNode(en: boolean): DAGNode {
       : "\u4f60\u662f\u4efb\u52d9\u7de8\u6392\u5668\u3002",
     passCondition: "",
     loopPrompt: "",
-    maxIterations: 3,
+    maxIterations: 5,
     status: "idle",
     output: "",
     visitCount: 0,
@@ -155,7 +155,7 @@ function createExitNode(en: boolean): DAGNode {
       : "\u4f60\u662f\u7d50\u679c\u5f59\u7e3d\u5668\u3002",
     passCondition: "",
     loopPrompt: "",
-    maxIterations: 3,
+    maxIterations: 5,
     status: "idle",
     output: "",
     visitCount: 0,
@@ -184,7 +184,7 @@ function migrateNode(n: any, index: number): DAGNode {
       role: "",
       passCondition: "",
       loopPrompt: "",
-      maxIterations: 3,
+      maxIterations: 5,
       status: "idle",
       output: "",
       visitCount: 0,
@@ -199,8 +199,8 @@ function migrateNode(n: any, index: number): DAGNode {
   const idx = typeof n.nodeIndex === "number"
     ? n.nodeIndex
     : n.id === ENTRY_NODE_ID ? 0
-    : n.id === EXIT_NODE_ID ? 99
-    : index
+      : n.id === EXIT_NODE_ID ? 99
+        : index
   return {
     id: n.id ?? genId("n"),
     nodeIndex: idx,
@@ -746,16 +746,16 @@ export default function TaskDAG() {
   // Check if selected node has loop edges
   const selectedNodeHasLoopEdge = selectedNode
     ? edges.some(
-        (e) =>
-          (e.from === selectedNode.id &&
-            e.type === "fail") ||
-          (e.to === selectedNode.id &&
-            edges.some(
-              (e2) =>
-                e2.from === selectedNode.id &&
-                e2.type === "fail",
-            )),
-      )
+      (e) =>
+        (e.from === selectedNode.id &&
+          e.type === "fail") ||
+        (e.to === selectedNode.id &&
+          edges.some(
+            (e2) =>
+              e2.from === selectedNode.id &&
+              e2.type === "fail",
+          )),
+    )
     : false
 
   // Edges from selected node
@@ -1063,7 +1063,7 @@ export default function TaskDAG() {
           : "\u4f60\u662f\u4e00\u500b\u6709\u7528\u7684\u52a9\u624b\u3002",
         passCondition: "",
         loopPrompt: "",
-        maxIterations: 3,
+        maxIterations: 5,
         status: "idle",
         output: "",
         visitCount: 0,
@@ -1149,7 +1149,7 @@ export default function TaskDAG() {
         : "\u4f60\u662f\u4e00\u500b\u6709\u7528\u7684\u52a9\u624b\u3002",
       passCondition: "",
       loopPrompt: "",
-      maxIterations: 3,
+      maxIterations: 5,
       status: "idle",
       output: "",
       visitCount: 0,
@@ -1520,9 +1520,26 @@ export default function TaskDAG() {
             // (not the conditional's own output) so the retry re-evaluates
             // the same input with improvement guidance appended.
             if (node.nodeType === "conditional") {
+              // Check if we've exceeded this conditional's max iterations
+              if (visits >= node.maxIterations) {
+                // Force-pass: max retries reached, route to pass edges with last output
+                const forceOutput = nodeOutputs.get(nodeId) || parsed.result
+                nodeOutputs.set(nodeId, forceOutput)
+                setNodes((p) => p.map((n) => n.id === nodeId ? { ...n, status: "completed" as NodeStatus, output: `[Max ${node.maxIterations} iterations reached]\n${forceOutput}`, visitCount: visits } : n))
+                const passEdges = outEdges.filter((e) => e.type === "pass" || e.type === "default")
+                for (const pe of passEdges) {
+                  deposit(pe.to, nodeId, forceOutput, pe.prompt || undefined)
+                }
+                return
+              }
               const originalInput = Array.from(predecessorOutputs.values()).join("\n---\n")
-              const improvementContext = `\n\n--- Conditional Check Failed (Iteration ${visits}) ---\nReason: ${parsed.result}\nImprovement guidance: ${node.conditionImprove}\n--- End Conditional Feedback ---`
+              const improvementContext = `\n\n--- Conditional Check Failed (Iteration ${visits}/${node.maxIterations}) ---\nReason: ${parsed.result}\nImprovement guidance: ${node.conditionImprove}\n--- End Conditional Feedback ---`
               for (const fe of nextEdges) {
+                // Override fail-target's maxIterations to allow enough retries
+                const targetNode = allNodesSnapshot.find((n) => n.id === fe.to)
+                if (targetNode) {
+                  setNodes((p) => p.map((n) => n.id === fe.to ? { ...n, maxIterations: Math.max(n.maxIterations, node.maxIterations + 1) } : n))
+                }
                 deposit(fe.to, nodeId, originalInput + improvementContext, fe.prompt || undefined)
               }
               // Skip onNodeComplete and default deposit — only fail edges should fire
@@ -1657,9 +1674,9 @@ export default function TaskDAG() {
         prev.map((n) =>
           n.id === nodeId
             ? {
-                ...n,
-                status: "running" as NodeStatus,
-              }
+              ...n,
+              status: "running" as NodeStatus,
+            }
             : n,
         ),
       )
@@ -1702,10 +1719,10 @@ export default function TaskDAG() {
           prev.map((n) =>
             n.id === nodeId
               ? {
-                  ...n,
-                  status: "completed" as NodeStatus,
-                  output: rawResponse,
-                }
+                ...n,
+                status: "completed" as NodeStatus,
+                output: rawResponse,
+              }
               : n,
           ),
         )
@@ -1718,10 +1735,10 @@ export default function TaskDAG() {
           prev.map((n) =>
             n.id === nodeId
               ? {
-                  ...n,
-                  status: "error" as NodeStatus,
-                  output: errMsg,
-                }
+                ...n,
+                status: "error" as NodeStatus,
+                output: errMsg,
+              }
               : n,
           ),
         )
@@ -2100,15 +2117,15 @@ export default function TaskDAG() {
               // Edge midpoint for label
               const mid = isFailFromConditional
                 ? {
-                    x: Math.min(out.x, inp.x) - 60,
-                    y: (out.y + inp.y) / 2,
-                  }
+                  x: Math.min(out.x, inp.x) - 60,
+                  y: (out.y + inp.y) / 2,
+                }
                 : edgeMidpoint(
-                    out.x,
-                    out.y,
-                    inp.x,
-                    inp.y,
-                  )
+                  out.x,
+                  out.y,
+                  inp.x,
+                  inp.y,
+                )
 
               return (
                 <g key={edge.id}>
@@ -2223,7 +2240,7 @@ export default function TaskDAG() {
                       >
                         {edge.label.length > 6
                           ? edge.label.slice(0, 6) +
-                            "\u2026"
+                          "\u2026"
                           : edge.label}
                       </text>
                     </g>
@@ -2492,15 +2509,15 @@ export default function TaskDAG() {
 
                   {/* Glassmorphism top highlight */}
                   {!isConditional && (
-                  <rect
-                    x={node.x + 1}
-                    y={node.y + 1}
-                    width={NODE_W - 2}
-                    height={NODE_H / 2.5}
-                    rx={11}
-                    fill="rgba(255,255,255,0.025)"
-                    pointerEvents="none"
-                  />
+                    <rect
+                      x={node.x + 1}
+                      y={node.y + 1}
+                      width={NODE_W - 2}
+                      height={NODE_H / 2.5}
+                      rx={11}
+                      fill="rgba(255,255,255,0.025)"
+                      pointerEvents="none"
+                    />
                   )}
 
                   {/* Node index badge — top-right corner */}
@@ -2544,33 +2561,33 @@ export default function TaskDAG() {
 
                   {/* Icon — hidden for conditional (diamond has centered text) */}
                   {!isConditional && (
-                  <foreignObject
-                    x={node.x + 10}
-                    y={node.y + 10}
-                    width={20}
-                    height={20}
-                    style={{ pointerEvents: "none" }}
-                  >
-                    <div
-                      className={cn(
-                        "flex items-center justify-center w-5 h-5",
-                        node.status === "running"
-                          ? "text-blue-400"
-                          : node.status ===
-                              "completed"
-                            ? "text-emerald-400"
-                            : node.status === "error"
-                              ? "text-red-400"
-                              : isEntryNode
-                                ? "text-emerald-400"
-                                : isExitNode
-                                  ? "text-red-400"
-                                  : "text-white/40",
-                      )}
+                    <foreignObject
+                      x={node.x + 10}
+                      y={node.y + 10}
+                      width={20}
+                      height={20}
+                      style={{ pointerEvents: "none" }}
                     >
-                      {nodeIcon(node)}
-                    </div>
-                  </foreignObject>
+                      <div
+                        className={cn(
+                          "flex items-center justify-center w-5 h-5",
+                          node.status === "running"
+                            ? "text-blue-400"
+                            : node.status ===
+                              "completed"
+                              ? "text-emerald-400"
+                              : node.status === "error"
+                                ? "text-red-400"
+                                : isEntryNode
+                                  ? "text-emerald-400"
+                                  : isExitNode
+                                    ? "text-red-400"
+                                    : "text-white/40",
+                        )}
+                      >
+                        {nodeIcon(node)}
+                      </div>
+                    </foreignObject>
                   )}
 
                   {/* Label */}
@@ -2613,7 +2630,7 @@ export default function TaskDAG() {
                         node.status === "running"
                           ? "rgba(147,197,253,0.95)"
                           : node.status ===
-                              "completed"
+                            "completed"
                             ? "rgba(110,231,183,0.9)"
                             : node.status === "error"
                               ? "rgba(252,165,165,0.9)"
@@ -2631,26 +2648,26 @@ export default function TaskDAG() {
                     >
                       {node.label.length > (isConditional ? 9 : 11)
                         ? node.label.slice(0, isConditional ? 9 : 11) +
-                          "\u2026"
+                        "\u2026"
                         : node.label}
                     </text>
                   )}
 
                   {/* Prompt preview — clipped to node width (hidden for diamond) */}
                   {!isConditional && (
-                  <text
-                    x={node.x + 12}
-                    y={node.y + 42}
-                    fontSize={8}
-                    fill="rgba(255,255,255,0.25)"
-                    fontFamily="system-ui, sans-serif"
-                    pointerEvents="none"
-                    clipPath={`inset(0 0 0 0)`}
-                  >
-                    {node.prompt.length > 18
-                      ? node.prompt.slice(0, 18) + "\u2026"
-                      : node.prompt}
-                  </text>
+                    <text
+                      x={node.x + 12}
+                      y={node.y + 42}
+                      fontSize={8}
+                      fill="rgba(255,255,255,0.25)"
+                      fontFamily="system-ui, sans-serif"
+                      pointerEvents="none"
+                      clipPath={`inset(0 0 0 0)`}
+                    >
+                      {node.prompt.length > 18
+                        ? node.prompt.slice(0, 18) + "\u2026"
+                        : node.prompt}
+                    </text>
                   )}
 
                   {/* Status indicator */}
@@ -2773,7 +2790,7 @@ export default function TaskDAG() {
                       r={PORT_R}
                       fill={
                         connecting?.fromId ===
-                        node.id
+                          node.id
                           ? "rgba(59,130,246,0.8)"
                           : isEntryNode
                             ? "rgba(52,211,153,0.5)"
@@ -2880,7 +2897,7 @@ export default function TaskDAG() {
                     s === "idle" && "bg-white/25",
                     s === "running" && "bg-blue-400",
                     s === "completed" &&
-                      "bg-emerald-400",
+                    "bg-emerald-400",
                     s === "error" && "bg-red-400",
                   )}
                 />
@@ -2950,25 +2967,25 @@ export default function TaskDAG() {
                   className={cn(
                     "w-2 h-2 rounded-full",
                     selectedNode.status === "running" &&
-                      "bg-blue-400",
+                    "bg-blue-400",
                     selectedNode.status ===
-                      "completed" && "bg-emerald-400",
+                    "completed" && "bg-emerald-400",
                     selectedNode.status === "error" &&
-                      "bg-red-400",
+                    "bg-red-400",
                     selectedNode.status === "idle" &&
-                      selectedNode.id ===
-                        ENTRY_NODE_ID &&
-                      "bg-emerald-400",
+                    selectedNode.id ===
+                    ENTRY_NODE_ID &&
+                    "bg-emerald-400",
                     selectedNode.status === "idle" &&
-                      selectedNode.id ===
-                        EXIT_NODE_ID &&
-                      "bg-red-400",
+                    selectedNode.id ===
+                    EXIT_NODE_ID &&
+                    "bg-red-400",
                     selectedNode.status === "idle" &&
-                      selectedNode.id !==
-                        ENTRY_NODE_ID &&
-                      selectedNode.id !==
-                        EXIT_NODE_ID &&
-                      "bg-white/25",
+                    selectedNode.id !==
+                    ENTRY_NODE_ID &&
+                    selectedNode.id !==
+                    EXIT_NODE_ID &&
+                    "bg-white/25",
                   )}
                 />
                 <span className="text-sm font-semibold text-white/90">
@@ -2993,14 +3010,14 @@ export default function TaskDAG() {
                   className={cn(
                     "text-[10px] px-2 py-0.5 rounded-md border font-medium",
                     selectedNode.status ===
-                      "completed" &&
-                      "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
+                    "completed" &&
+                    "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
                     selectedNode.status === "running" &&
-                      "bg-blue-500/10 border-blue-500/20 text-blue-400",
+                    "bg-blue-500/10 border-blue-500/20 text-blue-400",
                     selectedNode.status === "error" &&
-                      "bg-red-500/10 border-red-500/20 text-red-400",
+                    "bg-red-500/10 border-red-500/20 text-red-400",
                     selectedNode.status === "idle" &&
-                      "bg-white/5 border-white/10 text-white/40",
+                    "bg-white/5 border-white/10 text-white/40",
                   )}
                 >
                   {selectedNode.status === "idle"
@@ -3012,7 +3029,7 @@ export default function TaskDAG() {
                         ? "Running"
                         : "\u57f7\u884c\u4e2d"
                       : selectedNode.status ===
-                          "completed"
+                        "completed"
                         ? en
                           ? "Completed"
                           : "\u5df2\u5b8c\u6210"
@@ -3124,9 +3141,9 @@ export default function TaskDAG() {
                       prev.map((n) =>
                         n.id === selectedNode.id
                           ? {
-                              ...n,
-                              label: e.target.value,
-                            }
+                            ...n,
+                            label: e.target.value,
+                          }
                           : n,
                       ),
                     )
@@ -3149,9 +3166,9 @@ export default function TaskDAG() {
                       prev.map((n) =>
                         n.id === selectedNode.id
                           ? {
-                              ...n,
-                              role: e.target.value,
-                            }
+                            ...n,
+                            role: e.target.value,
+                          }
                           : n,
                       ),
                     )
@@ -3255,30 +3272,30 @@ export default function TaskDAG() {
                   </div>
                 </>
               ) : (
-              <div className="space-y-1.5">
-                <span className="text-[10px] text-white/30 uppercase tracking-wider">
-                  {en
-                    ? "System Prompt"
-                    : "\u7cfb\u7d71\u63d0\u793a\u8a5e"}
-                </span>
-                <textarea
-                  value={selectedNode.prompt}
-                  onChange={(e) =>
-                    setNodes((prev) =>
-                      prev.map((n) =>
-                        n.id === selectedNode.id
-                          ? {
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">
+                    {en
+                      ? "System Prompt"
+                      : "\u7cfb\u7d71\u63d0\u793a\u8a5e"}
+                  </span>
+                  <textarea
+                    value={selectedNode.prompt}
+                    onChange={(e) =>
+                      setNodes((prev) =>
+                        prev.map((n) =>
+                          n.id === selectedNode.id
+                            ? {
                               ...n,
                               prompt: e.target.value,
                             }
-                          : n,
-                      ),
-                    )
-                  }
-                  rows={4}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/70 placeholder:text-white/25 focus:outline-none focus:border-blue-500/40 resize-none transition-colors leading-relaxed overflow-y-auto"
-                />
-              </div>
+                            : n,
+                        ),
+                      )
+                    }
+                    rows={4}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white/70 placeholder:text-white/25 focus:outline-none focus:border-blue-500/40 resize-none transition-colors leading-relaxed overflow-y-auto"
+                  />
+                </div>
               )}
 
               {/* Pass condition */}
@@ -3295,10 +3312,10 @@ export default function TaskDAG() {
                       prev.map((n) =>
                         n.id === selectedNode.id
                           ? {
-                              ...n,
-                              passCondition:
-                                e.target.value,
-                            }
+                            ...n,
+                            passCondition:
+                              e.target.value,
+                          }
                           : n,
                       ),
                     )
@@ -3329,10 +3346,10 @@ export default function TaskDAG() {
                           prev.map((n) =>
                             n.id === selectedNode.id
                               ? {
-                                  ...n,
-                                  loopPrompt:
-                                    e.target.value,
-                                }
+                                ...n,
+                                loopPrompt:
+                                  e.target.value,
+                              }
                               : n,
                           ),
                         )
@@ -3366,19 +3383,19 @@ export default function TaskDAG() {
                           prev.map((n) =>
                             n.id === selectedNode.id
                               ? {
-                                  ...n,
-                                  maxIterations:
-                                    Math.max(
-                                      1,
-                                      Math.min(
-                                        20,
-                                        parseInt(
-                                          e.target
-                                            .value,
-                                        ) || 3,
-                                      ),
+                                ...n,
+                                maxIterations:
+                                  Math.max(
+                                    1,
+                                    Math.min(
+                                      20,
+                                      parseInt(
+                                        e.target
+                                          .value,
+                                      ) || 3,
                                     ),
-                                }
+                                  ),
+                              }
                               : n,
                           ),
                         )
@@ -3415,7 +3432,7 @@ export default function TaskDAG() {
                                   edge.type === "pass"
                                     ? EDGE_COLOR_PASS
                                     : edge.type ===
-                                        "fail"
+                                      "fail"
                                       ? EDGE_COLOR_FAIL
                                       : "rgba(255,255,255,0.3)",
                               }}
@@ -3448,11 +3465,11 @@ export default function TaskDAG() {
                                   prev.map((ed) =>
                                     ed.id === edge.id
                                       ? {
-                                          ...ed,
-                                          label:
-                                            e.target
-                                              .value,
-                                        }
+                                        ...ed,
+                                        label:
+                                          e.target
+                                            .value,
+                                      }
                                       : ed,
                                   ),
                                 )
@@ -3473,17 +3490,17 @@ export default function TaskDAG() {
                                   prev.map((ed) =>
                                     ed.id === edge.id
                                       ? {
-                                          ...ed,
-                                          type: newType,
-                                          color:
-                                            newType ===
+                                        ...ed,
+                                        type: newType,
+                                        color:
+                                          newType ===
                                             "pass"
-                                              ? EDGE_COLOR_PASS
-                                              : newType ===
-                                                  "fail"
-                                                ? EDGE_COLOR_FAIL
-                                                : EDGE_COLOR_DEFAULT,
-                                        }
+                                            ? EDGE_COLOR_PASS
+                                            : newType ===
+                                              "fail"
+                                              ? EDGE_COLOR_FAIL
+                                              : EDGE_COLOR_DEFAULT,
+                                      }
                                       : ed,
                                   ),
                                 )
@@ -3508,11 +3525,11 @@ export default function TaskDAG() {
                                 prev.map((ed) =>
                                   ed.id === edge.id
                                     ? {
-                                        ...ed,
-                                        prompt:
-                                          e.target
-                                            .value,
-                                      }
+                                      ...ed,
+                                      prompt:
+                                        e.target
+                                          .value,
+                                    }
                                     : ed,
                                 ),
                               )
@@ -3643,7 +3660,7 @@ export default function TaskDAG() {
                     }
                     disabled={
                       selectedNode.status ===
-                        "running" || isRunning
+                      "running" || isRunning
                     }
                     className={cn(
                       "flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors",
@@ -3670,7 +3687,7 @@ export default function TaskDAG() {
                       "flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors",
                       isRunning ||
                         selectedNode.deletable ===
-                          false
+                        false
                         ? "bg-white/5 text-white/20 cursor-not-allowed border border-white/5"
                         : "text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20",
                     )}
