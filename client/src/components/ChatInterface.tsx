@@ -217,25 +217,25 @@ function MessageBubble({
       {showAvatar && (
         (isUser ? (avatarDisplay === "both" || avatarDisplay === "user") : (avatarDisplay === "both" || avatarDisplay === "ai"))
       ) && (
-        <div
-          className={cn(
-            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 overflow-hidden",
-            isUser
-              ? userAvatarUrl ? "" : "bg-gradient-to-br from-blue-500 to-violet-600"
-              : "bg-gradient-to-br from-violet-600 to-blue-500 ring-1 ring-white/10",
-          )}
-        >
-          {isUser ? (
-            userAvatarUrl ? (
-              <img src={userAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+          <div
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 overflow-hidden",
+              isUser
+                ? userAvatarUrl ? "" : "bg-gradient-to-br from-blue-500 to-violet-600"
+                : "bg-gradient-to-br from-violet-600 to-blue-500 ring-1 ring-white/10",
+            )}
+          >
+            {isUser ? (
+              userAvatarUrl ? (
+                <img src={userAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+              ) : (
+                <User size={14} className="text-white" />
+              )
             ) : (
-              <User size={14} className="text-white" />
-            )
-          ) : (
-            <img src="/logos/app-logo.png" alt="AI" className="w-8 h-8 rounded-full" />
-          )}
-        </div>
-      )}
+              <img src="/logos/app-logo.png" alt="AI" className="w-8 h-8 rounded-full" />
+            )}
+          </div>
+        )}
 
       <div
         className={cn(
@@ -882,19 +882,24 @@ function needsWebSearch(msg: string): "yes" | "no" | "maybe" {
   if (trimmed.length < 10) return "no"
   if (/^(hi|hello|hey|你好|嗨|哈囉|謝謝|thanks|ok|好的)\b/i.test(trimmed)) return "no"
   if (/^```[\s\S]*```$/.test(trimmed)) return "no"
-  // Skip: conversation meta
-  if (/^(summarize|explain|翻譯|整理|摘要|重寫|改寫)/i.test(trimmed)) return "no"
+  // Skip: conversation meta / code tasks
+  if (/^(summarize|explain|翻譯|整理|摘要|重寫|改寫|幫我寫|write me|debug|fix|refactor)/i.test(trimmed)) return "no"
+
+  // Search: user provides a URL — fetch it (handled separately, but flag yes for doSearch gate)
+  if (/https?:\/\//i.test(trimmed)) return "yes"
+
+  // Search: explicit intent (EN)
+  if (/\b(search|search for|look up|look it up|find out|google|browse|check online|research|find me)\b/i.test(trimmed)) return "yes"
+  // Search: explicit intent (ZH)
+  if (/(搜尋|搜索|查詢|查一下|搜一下|上網|上網查|幫我查|網上|網路上|去查|查找|搜一搜|查查|幫查|幫我搜)/.test(trimmed)) return "yes"
 
   // Search: temporal markers
-  if (/\b(最新|today|yesterday|昨天|今天|2025|2026|目前|currently|latest|recent|now)\b/i.test(trimmed)) return "yes"
+  if (/\b(最新|today|yesterday|昨天|今天|2025|2026|目前|currently|latest|recent|now|update on|what's new)\b/i.test(trimmed)) return "yes"
   // Search: factual questions
-  if (/^(who|what is|where|when|how much|how many|誰|什麼是|哪裡|多少|幾)/i.test(trimmed)) return "yes"
-  // Search: prices, weather, news
-  if (/\b(price|股價|天氣|weather|news|新聞|匯率|exchange rate)\b/i.test(trimmed)) return "yes"
-  // Search: explicit intent
-  if (/\b(搜尋|search for|look up|查詢|find out|google|上網|上網查|幫我查|查一下|搜一下|網上|網路上)\b/i.test(trimmed)) return "yes"
-  // Search: user provides a URL — should fetch it
-  if (/https?:\/\//i.test(trimmed)) return "yes"
+  if (/^(who |what is|what are|what was|where |when |how much|how many|how to|is there|are there|tell me about)/i.test(trimmed)) return "yes"
+  if (/^(誰|什麼是|哪裡|多少|幾|怎麼|有沒有|是否|哪個|哪些|告訴我)/.test(trimmed)) return "yes"
+  // Search: prices, weather, news, events, products
+  if (/\b(price|pricing|股價|天氣|weather|news|新聞|匯率|exchange rate|score|比分|release date|發售|上市|開賣|評價|review|比較|compare|vs|versus)\b/i.test(trimmed)) return "yes"
 
   return "maybe"
 }
@@ -1180,7 +1185,7 @@ export default function ChatInterface({
   // ── Voice recording with audio level monitoring ──
   const stopAudioMonitor = useCallback(() => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-    audioContextRef.current?.close().catch(() => {})
+    audioContextRef.current?.close().catch(() => { })
     audioContextRef.current = null
     analyserRef.current = null
     setAudioLevel(0)
@@ -1528,7 +1533,8 @@ export default function ChatInterface({
           )
           doSearch = /yes/i.test(classifyResult.trim())
         } catch {
-          doSearch = false
+          // On classify failure, err on the side of searching
+          doSearch = true
         }
       }
     }
@@ -1582,19 +1588,32 @@ export default function ChatInterface({
         if (webContext) {
           toast.info(
             lang === "en"
-              ? `Web results added`
+              ? `Web results added to context`
               : `已加入網路搜尋結果`,
+            { duration: 2000 },
+          )
+        } else {
+          toast.warning(
+            lang === "en"
+              ? "Web search returned no results"
+              : "網路搜尋未找到結果",
             { duration: 2000 },
           )
         }
       } catch (err) {
         console.warn("Web search failed:", err)
+        toast.warning(
+          lang === "en"
+            ? "Web search failed"
+            : "網路搜尋失敗",
+          { duration: 2000 },
+        )
       }
     }
 
-    // Build web/url instruction for the AI
+    // Build web/url instruction for the AI — strong directive to use retrieved data
     const webAndUrlContext = (urlContext || webContext)
-      ? `\n\n=== Web Information (REAL DATA — use this to answer) ===\nThe following is real, factual information retrieved from the internet. Base your answer on this data. Cite sources when possible. If the information doesn't fully answer the user's question, say so honestly rather than making things up.${urlContext}${webContext}\n=== End Web Information ===`
+      ? `\n\n=== LIVE WEB DATA (MANDATORY — YOU MUST USE THIS) ===\nThe following information was just retrieved from the internet in real-time. This is FRESH, REAL data — NOT from your training data.\n\nCRITICAL RULES:\n1. You MUST base your answer primarily on this retrieved data\n2. You MUST cite the source URLs when available\n3. Do NOT rely on your training data for facts covered by this web data\n4. If the web data contradicts your training data, trust the web data\n5. If the web data doesn't fully answer the question, say so honestly\n${urlContext}${webContext}\n=== END LIVE WEB DATA ===`
       : ""
 
     // Inject conversation memory (branch-isolated)
@@ -1628,18 +1647,18 @@ export default function ChatInterface({
         role: m.role,
         content: m.imageData && m.imageMimeType
           ? [
-              { type: "text" as const, text: m.content },
-              { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
-            ]
+            { type: "text" as const, text: m.content },
+            { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
+          ]
           : m.content,
       }))
       chatHistory.push({
         role: "user",
         content: currentImage
           ? [
-              { type: "text" as const, text: userMsg.content },
-              { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
-            ]
+            { type: "text" as const, text: userMsg.content },
+            { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
+          ]
           : userMsg.content,
       })
 
@@ -1690,7 +1709,7 @@ export default function ChatInterface({
           .then(() => {
             if (voiceMode) startRecording()
           })
-          .catch(() => {})
+          .catch(() => { })
       }
 
       // Extract conversation memory in background
@@ -1703,7 +1722,7 @@ export default function ChatInterface({
         fallbackKey,
         callAI,
         activeBranchId,
-      ).catch(() => {})
+      ).catch(() => { })
 
       // Auto-name conversation on first message
       if (visibleMessages.length === 0) {
@@ -2116,9 +2135,9 @@ export default function ChatInterface({
                 style={
                   settings.enableAnimations
                     ? {
-                        animationDelay: `${i * 30}ms`,
-                        animationFillMode: "both",
-                      }
+                      animationDelay: `${i * 30}ms`,
+                      animationFillMode: "both",
+                    }
                     : undefined
                 }
               >
@@ -2239,7 +2258,7 @@ export default function ChatInterface({
               className="relative"
               onPointerDown={(e) => {
                 e.preventDefault()
-                ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+                  ; (e.target as HTMLElement).setPointerCapture(e.pointerId)
                 handleVoiceDragStart(e.clientX, e.clientY)
               }}
               onPointerMove={(e) => handleVoiceDragMove(e.clientX, e.clientY)}
