@@ -111,10 +111,10 @@ https://github.com/user-attachments/assets/cb438b09-abd0-41ba-b7a4-39aa5f27f7a1
 
 **Context Pinning**<br/>**上下文釘選**
 
-<!--
-<video src="docs/media/demos/06-context-pin.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-06_Context_Pin-1e293b?style=flat-square&labelColor=0f172a" alt="06" />
+
+
+https://github.com/user-attachments/assets/eb4cf440-c005-4320-8c57-5a2676efed15
+
 
 </td>
 </tr>
