@@ -892,7 +892,9 @@ function needsWebSearch(msg: string): "yes" | "no" | "maybe" {
   // Search: prices, weather, news
   if (/\b(price|股價|天氣|weather|news|新聞|匯率|exchange rate)\b/i.test(trimmed)) return "yes"
   // Search: explicit intent
-  if (/\b(搜尋|search for|look up|查詢|find out|google)\b/i.test(trimmed)) return "yes"
+  if (/\b(搜尋|search for|look up|查詢|find out|google|上網|上網查|幫我查|查一下|搜一下|網上|網路上)\b/i.test(trimmed)) return "yes"
+  // Search: user provides a URL — should fetch it
+  if (/https?:\/\//i.test(trimmed)) return "yes"
 
   return "maybe"
 }

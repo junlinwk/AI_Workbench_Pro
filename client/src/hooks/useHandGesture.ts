@@ -89,7 +89,7 @@ export function useHandGesture(
     }
     closePiPWindow()
     if (recognizerRef.current) {
-      recognizerRef.current.close()
+      try { recognizerRef.current.close() } catch { /* already closed */ }
       recognizerRef.current = null
     }
     if (streamRef.current) {
@@ -143,15 +143,30 @@ export function useHandGesture(
         )
         if (cancelled) return
 
-        const recognizer = await GestureRecognizer.createFromOptions(fileset, {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
-            delegate: "GPU",
-          },
-          runningMode: "VIDEO",
-          numHands: 1,
-        })
+        // Try GPU first, fall back to CPU if WebGL is unavailable
+        let recognizer: any
+        try {
+          recognizer = await GestureRecognizer.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 1,
+          })
+        } catch {
+          // GPU delegate failed — fall back to CPU
+          recognizer = await GestureRecognizer.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+              delegate: "CPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 1,
+          })
+        }
         if (cancelled) {
           recognizer.close()
           return

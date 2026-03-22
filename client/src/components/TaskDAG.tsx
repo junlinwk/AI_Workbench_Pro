@@ -1508,13 +1508,13 @@ export default function TaskDAG() {
             nextEdges = outEdges.filter((e) => e.type === "pass" || e.type === "default")
           } else {
             nextEdges = outEdges.filter((e) => e.type === "fail")
-            // Reset loop targets
+            // Reset loop targets — clear mailbox and set expectedIn to
+            // expect THIS conditional node (nodeId) as the sole sender,
+            // since it's the conditional depositing the retry payload.
             for (const fe of nextEdges) {
               mailbox.set(fe.to, new Map())
               edgePrompts.set(fe.to, new Map())
-              expectedIn.set(fe.to, new Set(
-                allEdgesSnapshot.filter((e) => e.to === fe.to && e.type !== "fail" && e.from !== fe.to).map((e) => e.from)
-              ))
+              expectedIn.set(fe.to, new Set([nodeId]))
             }
             // For conditional nodes, re-deposit ORIGINAL predecessor outputs
             // (not the conditional's own output) so the retry re-evaluates
