@@ -50,22 +50,20 @@
 <tr>
 <td width="50%" align="center">
 
-**Multi-Provider AI Chat**<br/>多模型 AI 對話
+**Multi-Provider AI Chat**<br/>**多模型 AI 對話**
 
-<!--
-<video src="docs/media/demos/01-chat.mp4" width="100%" controls></video>
--->
+
+https://github.com/user-attachments/assets/1d599bd9-4a9b-490b-8713-2649443f83da
+
 
 </td>
 <td width="50%" align="center">
 
-**MD/HTML Artifacts Panel**<br/>MD/HTML 程式碼即時預覽
+**MD/HTML Artifacts Panel**<br/> **MD/HTML 程式碼即時預覽**
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/0e8bf36d-4d25-4c39-bc4e-6fe692ab10fa" 
-         muted autoplay loop playsinline width="100%">
-  </video>
-</div>
+
+
+https://github.com/user-attachments/assets/cb438b09-abd0-41ba-b7a4-39aa5f27f7a1
 
 
 </td>
@@ -75,7 +73,7 @@
 <tr>
 <td align="center">
 
-**Conversation Branching**<br/>對話分支
+**Conversation Branching**<br/>**對話分支**
 
 
 <video src="https://github.com/user-attachments/assets/4745c5e2-8937-404b-9c7a-9c13a780755e" 
@@ -89,7 +87,7 @@
 </td>
 <td align="center">
 
-**Task DAG Editor**<br/>視覺化任務圖編輯器
+**Task DAG Editor**<br/>**視覺化任務圖編輯器**
 
 <!--
 <video src="docs/media/demos/04-task-dag.mp4" width="100%" controls></video>
@@ -101,7 +99,7 @@
 <tr>
 <td align="center">
 
-**Memory Map**<br/>知識圖譜
+**Memory Map**<br/>**知識圖譜**
 
 <!--
 <video src="docs/media/demos/05-memory-map.mp4" width="100%" controls></video>
@@ -111,7 +109,7 @@
 </td>
 <td align="center">
 
-**Context Pinning**<br/>上下文釘選
+**Context Pinning**<br/>**上下文釘選**
 
 <!--
 <video src="docs/media/demos/06-context-pin.mp4" width="100%" controls></video>
@@ -123,7 +121,7 @@
 <tr>
 <td align="center">
 
-**Voice & Gesture Mode**<br/>語音 + 手勢操控
+**Voice & Gesture Mode**<br/>**語音 + 手勢操控**
 
 <!--
 <video src="docs/media/demos/07-voice-gesture.mp4" width="100%" controls></video>
@@ -133,7 +131,7 @@
 </td>
 <td align="center">
 
-**Widget Builder**<br/>AI Widget 生成器
+**Notepad**<br/>**記事本**
 
 <!--
 <video src="docs/media/demos/08-widgets.mp4" width="100%" controls></video>
@@ -145,7 +143,7 @@
 <tr>
 <td align="center">
 
-**Notepad & Search**<br/>記事本 + 語義搜尋
+**Semantic Search**<br/>**語意搜尋**
 
 <!--
 <video src="docs/media/demos/09-notepad-search.mp4" width="100%" controls></video>
