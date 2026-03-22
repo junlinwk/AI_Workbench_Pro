@@ -133,10 +133,9 @@ https://github.com/user-attachments/assets/eb4cf440-c005-4320-8c57-5a2676efed15
 
 **Notepad**<br/>**記事本**
 
-<!--
-<video src="docs/media/demos/08-widgets.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-08_Widgets-1e293b?style=flat-square&labelColor=0f172a" alt="08" />
+
+https://github.com/user-attachments/assets/4755c97b-1936-40db-aa3f-a7984a6bfe86
+
 
 </td>
 </tr>
@@ -147,7 +146,9 @@ https://github.com/user-attachments/assets/eb4cf440-c005-4320-8c57-5a2676efed15
 
 
 
-https://github.com/user-attachments/assets/69fe393a-5a3c-4557-a11a-5a14aeadb701
+
+https://github.com/user-attachments/assets/7998c170-fcb1-4817-abe2-873592404632
+
 
 
 </td>
