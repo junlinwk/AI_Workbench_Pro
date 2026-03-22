@@ -59,11 +59,14 @@
 </td>
 <td width="50%" align="center">
 
-**Artifacts Panel**<br/>程式碼即時預覽
+**MD/HTML Artifacts Panel**<br/>MD/HTML 程式碼即時預覽
 
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/0e8bf36d-4d25-4c39-bc4e-6fe692ab10fa" 
+         muted autoplay loop playsinline width="100%">
+  </video>
+</div>
 
-
-https://github.com/user-attachments/assets/0e8bf36d-4d25-4c39-bc4e-6fe692ab10fa
 
 </td>
 </tr>
@@ -74,8 +77,14 @@ https://github.com/user-attachments/assets/0e8bf36d-4d25-4c39-bc4e-6fe692ab10fa
 
 **Conversation Branching**<br/>對話分支
 
-https://github.com/user-attachments/assets/4745c5e2-8937-404b-9c7a-9c13a780755e
 
+<video src="https://github.com/user-attachments/assets/4745c5e2-8937-404b-9c7a-9c13a780755e" 
+       autoplay 
+       loop 
+       muted 
+       playsinline 
+       width="100%">
+</video>
 
 </td>
 <td align="center">
