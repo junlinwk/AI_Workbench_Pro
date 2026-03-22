@@ -145,10 +145,10 @@ https://github.com/user-attachments/assets/eb4cf440-c005-4320-8c57-5a2676efed15
 
 **Semantic Search**<br/>**語意搜尋**
 
-<!--
-<video src="docs/media/demos/09-notepad-search.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-09_Notepad_Search-1e293b?style=flat-square&labelColor=0f172a" alt="09" />
+
+
+https://github.com/user-attachments/assets/69fe393a-5a3c-4557-a11a-5a14aeadb701
+
 
 </td>
 <td align="center">
