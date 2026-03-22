@@ -89,10 +89,9 @@ https://github.com/user-attachments/assets/cb438b09-abd0-41ba-b7a4-39aa5f27f7a1
 
 **Task DAG Editor**<br/>**視覺化任務圖編輯器**
 
-<!--
-<video src="docs/media/demos/04-task-dag.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-04_Task_DAG-1e293b?style=flat-square&labelColor=0f172a" alt="04" />
+
+https://github.com/user-attachments/assets/80f2feab-1456-480e-a1c9-89abb33bdab3
+
 
 </td>
 </tr>
