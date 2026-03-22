@@ -1726,6 +1726,7 @@ export default function ChatInterface({
 
       // Auto-name conversation on first message
       if (visibleMessages.length === 0) {
+        let cleanTitle = ""
         try {
           const titlePrompt = `Generate a short title (max 20 chars) for this conversation based on the user's message. Reply with ONLY the title, no quotes, no explanation.\n\nUser: "${sanitized.slice(0, 200)}"`
           const title = await callAI(
@@ -1736,19 +1737,21 @@ export default function ChatInterface({
             30,
             "Output only a short title. No quotes. No explanation.",
           )
-          const cleanTitle = title
+          cleanTitle = title
             .trim()
             .replace(/^["']|["']$/g, "")
             .slice(0, 25)
-          if (cleanTitle) {
-            window.dispatchEvent(
-              new CustomEvent("rename-chat", {
-                detail: { chatId: effectiveConvId, title: cleanTitle },
-              }),
-            )
-          }
         } catch {
-          // Silent fail — naming is non-critical
+          // AI naming failed — fallback to first few words of user message
+          cleanTitle = sanitized.slice(0, 20).trim()
+          if (cleanTitle.length >= 20) cleanTitle = cleanTitle.slice(0, 18) + "…"
+        }
+        if (cleanTitle) {
+          window.dispatchEvent(
+            new CustomEvent("rename-chat", {
+              detail: { chatId: effectiveConvId, title: cleanTitle },
+            }),
+          )
         }
       }
 
