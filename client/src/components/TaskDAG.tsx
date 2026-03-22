@@ -1516,11 +1516,14 @@ export default function TaskDAG() {
                 allEdgesSnapshot.filter((e) => e.to === fe.to && e.type !== "fail" && e.from !== fe.to).map((e) => e.from)
               ))
             }
-            // For conditional nodes, include improvement guidance in fail edge deposit
+            // For conditional nodes, re-deposit ORIGINAL predecessor outputs
+            // (not the conditional's own output) so the retry re-evaluates
+            // the same input with improvement guidance appended.
             if (node.nodeType === "conditional") {
+              const originalInput = Array.from(predecessorOutputs.values()).join("\n---\n")
               const improvementContext = `\n\n--- Conditional Check Failed (Iteration ${visits}) ---\nReason: ${parsed.result}\nImprovement guidance: ${node.conditionImprove}\n--- End Conditional Feedback ---`
               for (const fe of nextEdges) {
-                deposit(fe.to, nodeId, (nodeOutputs.get(fe.from) || "") + improvementContext, fe.prompt || undefined)
+                deposit(fe.to, nodeId, originalInput + improvementContext, fe.prompt || undefined)
               }
               // Skip onNodeComplete and default deposit — only fail edges should fire
               return

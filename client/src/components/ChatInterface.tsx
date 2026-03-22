@@ -2531,8 +2531,9 @@ export default function ChatInterface({
             {/* Hand gesture mode toggle */}
             <button
               onClick={() => {
-                setHandGestureMode(prev => !prev)
-                if (!handGestureMode) {
+                const turningOn = !handGestureMode
+                setHandGestureMode(turningOn)
+                if (turningOn) {
                   setVoiceMode(false) // mutual exclusion
                   stopRecording()
                   toast.info(

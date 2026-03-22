@@ -20,7 +20,12 @@
       "Bash(pnpm:*)",
       "WebSearch",
       "Bash(python3 -c \"from PIL import Image; img = Image.open\\(''docs/media/logo-banner.png''\\); print\\(f''{img.width}x{img.height}''\\)\")",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(find /home/claude/projects/Prjs107/dev/Personal-Optimized-AI-Webpage -type f -name *gesture* -o -name *hand*)",
+      "Bash(grep -r \"HandGestureOverlay\\\\|useHandGesture\" /home/claude/projects/Prjs107/dev/Personal-Optimized-AI-Webpage --include=*.tsx --include=*.ts)",
+      "Bash(npm list:*)",
+      "Bash(/tmp/bug_trace.txt:*)",
+      "Read(//tmp/**)"
     ]
   }
 }
