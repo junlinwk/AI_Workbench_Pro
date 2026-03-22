@@ -62,17 +62,20 @@
 **Artifacts Panel**<br/>程式碼即時預覽
 
 
-<video src="docs/media/demos/02-artifacts.mp4" width="100%" controls></video>
+
+https://github.com/user-attachments/assets/0e8bf36d-4d25-4c39-bc4e-6fe692ab10fa
 
 </td>
 </tr>
+
+
 <tr>
 <td align="center">
 
 **Conversation Branching**<br/>對話分支
 
+https://github.com/user-attachments/assets/4745c5e2-8937-404b-9c7a-9c13a780755e
 
-<video src="docs/media/demos/03-branching.mp4" width="100%" controls></video>
 
 </td>
 <td align="center">
