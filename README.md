@@ -61,10 +61,8 @@
 
 **Artifacts Panel**<br/>程式碼即時預覽
 
-<!--
+
 <video src="docs/media/demos/02-artifacts.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-02_Artifacts-1e293b?style=flat-square&labelColor=0f172a" alt="02" />
 
 </td>
 </tr>
@@ -73,10 +71,8 @@
 
 **Conversation Branching**<br/>對話分支
 
-<!--
+
 <video src="docs/media/demos/03-branching.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-03_Branching-1e293b?style=flat-square&labelColor=0f172a" alt="03" />
 
 </td>
 <td align="center">
