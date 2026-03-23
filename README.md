@@ -124,10 +124,10 @@ https://github.com/user-attachments/assets/eb4cf440-c005-4320-8c57-5a2676efed15
 
 **Voice & Gesture Mode**<br/>**語音 + 手勢操控**
 
-<!--
-<video src="docs/media/demos/07-voice-gesture.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-07_Voice_Gesture-1e293b?style=flat-square&labelColor=0f172a" alt="07" />
+
+
+https://github.com/user-attachments/assets/c7edd016-76d0-42df-aec2-a64c4d13e38f
+
 
 </td>
 <td align="center">
@@ -155,16 +155,44 @@ https://github.com/user-attachments/assets/7998c170-fcb1-4817-abe2-873592404632
 </td>
 <td align="center">
 
-**Settings & Security**<br/>設定 + 安全機制
+**Chat Lock**<br/>對話上鎖
 
-<!--
-<video src="docs/media/demos/10-settings-security.mp4" width="100%" controls></video>
--->
-<img src="https://img.shields.io/badge/Coming_Soon-10_Settings_Security-1e293b?style=flat-square&labelColor=0f172a" alt="10" />
+
+https://github.com/user-attachments/assets/1eda08da-5daf-4498-801f-2a1931b57b1c
+
+
 
 </td>
 </tr>
+
+<tr>
+<td width="50%" align="center">
+
+**Login Page**<br/>**登入頁面**
+
+
+
+https://github.com/user-attachments/assets/344dd73e-3e90-4763-9ffd-10b9f6df9ad7
+
+
+
+</td>
+<td width="50%" align="center">
+
+**Settings**<br/> **設定**
+
+
+
+https://github.com/user-attachments/assets/e9e849f5-4864-4bb8-9942-87ba311d45bf
+
+
+
+
+</td>
+</tr>
+
 </table>
+
 
 ---
 
