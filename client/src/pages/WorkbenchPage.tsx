@@ -84,7 +84,12 @@ export default function WorkbenchPage() {
 
   // Conversation management — persisted per user
   const [activeConversationId, setActiveConversationId] = useState<string>(() => {
-    return loadUserData(userId, "active-conversation", `chat-${Date.now()}`);
+    const stored = loadUserData<string | null>(userId, "active-conversation", null);
+    if (stored) return stored;
+    // No stored conversation — create a stable default and persist it immediately
+    const newId = `chat-${Date.now()}`;
+    saveUserData(userId, "active-conversation", newId);
+    return newId;
   });
 
   useEffect(() => {

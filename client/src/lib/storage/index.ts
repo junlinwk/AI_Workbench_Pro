@@ -291,8 +291,21 @@ export async function initStorage(userId: string): Promise<void> {
 
   // Step 4: Flush pending cache to localStorage on page close to prevent data loss
   // (IDB writes are async and may not complete before unload)
+  // Priority: sidebar-folders first (conversation list), then settings, then messages
   window.addEventListener("beforeunload", () => {
-    for (const [key, value] of cache.entries()) {
+    const priority = ["sidebar-folders", "settings"]
+    const entries = [...cache.entries()]
+
+    // Sort: priority keys first, then the rest
+    entries.sort(([a], [b]) => {
+      const aPri = priority.findIndex((p) => a.includes(p))
+      const bPri = priority.findIndex((p) => b.includes(p))
+      if (aPri !== -1 && bPri === -1) return -1
+      if (aPri === -1 && bPri !== -1) return 1
+      return 0
+    })
+
+    for (const [key, value] of entries) {
       try {
         const sepIdx = key.indexOf(":")
         if (sepIdx === -1) continue
@@ -300,7 +313,10 @@ export async function initStorage(userId: string): Promise<void> {
         const ns = key.slice(sepIdx + 1)
         const lsKey = `ai-wb-${ns}-${uid}`
         localStorage.setItem(lsKey, JSON.stringify(value))
-      } catch { }
+      } catch {
+        // localStorage full — stop trying to avoid blocking unload
+        break
+      }
     }
   })
 

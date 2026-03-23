@@ -217,25 +217,25 @@ function MessageBubble({
       {showAvatar && (
         (isUser ? (avatarDisplay === "both" || avatarDisplay === "user") : (avatarDisplay === "both" || avatarDisplay === "ai"))
       ) && (
-          <div
-            className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 overflow-hidden",
-              isUser
-                ? userAvatarUrl ? "" : "bg-gradient-to-br from-blue-500 to-violet-600"
-                : "bg-gradient-to-br from-violet-600 to-blue-500 ring-1 ring-white/10",
-            )}
-          >
-            {isUser ? (
-              userAvatarUrl ? (
-                <img src={userAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
-              ) : (
-                <User size={14} className="text-white" />
-              )
+        <div
+          className={cn(
+            "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 overflow-hidden",
+            isUser
+              ? userAvatarUrl ? "" : "bg-gradient-to-br from-blue-500 to-violet-600"
+              : "bg-gradient-to-br from-violet-600 to-blue-500 ring-1 ring-white/10",
+          )}
+        >
+          {isUser ? (
+            userAvatarUrl ? (
+              <img src={userAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
             ) : (
-              <img src="/logos/app-logo.png" alt="AI" className="w-8 h-8 rounded-full" />
-            )}
-          </div>
-        )}
+              <User size={14} className="text-white" />
+            )
+          ) : (
+            <img src="/logos/app-logo.png" alt="AI" className="w-8 h-8 rounded-full" />
+          )}
+        </div>
+      )}
 
       <div
         className={cn(
@@ -1185,7 +1185,7 @@ export default function ChatInterface({
   // ── Voice recording with audio level monitoring ──
   const stopAudioMonitor = useCallback(() => {
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-    audioContextRef.current?.close().catch(() => { })
+    audioContextRef.current?.close().catch(() => {})
     audioContextRef.current = null
     analyserRef.current = null
     setAudioLevel(0)
@@ -1647,18 +1647,18 @@ export default function ChatInterface({
         role: m.role,
         content: m.imageData && m.imageMimeType
           ? [
-            { type: "text" as const, text: m.content },
-            { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
-          ]
+              { type: "text" as const, text: m.content },
+              { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
+            ]
           : m.content,
       }))
       chatHistory.push({
         role: "user",
         content: currentImage
           ? [
-            { type: "text" as const, text: userMsg.content },
-            { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
-          ]
+              { type: "text" as const, text: userMsg.content },
+              { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
+            ]
           : userMsg.content,
       })
 
@@ -1709,7 +1709,7 @@ export default function ChatInterface({
           .then(() => {
             if (voiceMode) startRecording()
           })
-          .catch(() => { })
+          .catch(() => {})
       }
 
       // Extract conversation memory in background
@@ -1722,7 +1722,7 @@ export default function ChatInterface({
         fallbackKey,
         callAI,
         activeBranchId,
-      ).catch(() => { })
+      ).catch(() => {})
 
       // Auto-name conversation on first message
       if (visibleMessages.length === 0) {
@@ -2138,9 +2138,9 @@ export default function ChatInterface({
                 style={
                   settings.enableAnimations
                     ? {
-                      animationDelay: `${i * 30}ms`,
-                      animationFillMode: "both",
-                    }
+                        animationDelay: `${i * 30}ms`,
+                        animationFillMode: "both",
+                      }
                     : undefined
                 }
               >
@@ -2261,7 +2261,7 @@ export default function ChatInterface({
               className="relative"
               onPointerDown={(e) => {
                 e.preventDefault()
-                  ; (e.target as HTMLElement).setPointerCapture(e.pointerId)
+                ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
                 handleVoiceDragStart(e.clientX, e.clientY)
               }}
               onPointerMove={(e) => handleVoiceDragMove(e.clientX, e.clientY)}
