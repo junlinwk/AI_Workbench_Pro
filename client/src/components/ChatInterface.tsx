@@ -55,6 +55,14 @@ import { t } from "@/i18n"
 import { ALL_MODELS, MODEL_PROVIDERS, getAllModels } from "./ModelSwitcher"
 import { callAI, VISION_MODELS } from "@/lib/aiClient"
 import type { ContentPart, ChatMessage } from "@/lib/aiClient"
+import { runToolLoop } from "@/lib/tools/loop"
+import type { Tool, ToolContext } from "@/lib/tools/types"
+import { getBuiltinTools } from "@/lib/tools/registry"
+import { getMcpTools, mergeTools } from "@/lib/tools/mcpAdapter"
+import { pickModel, estimateTokens } from "@/lib/modelRouter"
+import { prepareAttachment } from "@/lib/files/prepareAttachment"
+import { supportsNativePdf } from "@/lib/files/types"
+import type { AttachedFile } from "@/lib/files/types"
 import {
   transcribeAudio,
   textToSpeech,
@@ -102,6 +110,21 @@ export interface Message {
   branchId: string
   imageData?: string
   imageMimeType?: string
+  /** Attached non-image file (PDF, text, code). */
+  fileData?: string
+  fileMimeType?: string
+  fileName?: string
+  fileHandling?: "native" | "text"
+  /** Tool calls executed during this assistant turn (for UI display). */
+  toolCalls?: Array<{
+    id: string
+    name: string
+    input: unknown
+    result?: string
+    isError?: boolean
+  }>
+  /** Router decision when auto-routing picked the model. */
+  routingReason?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +155,90 @@ Guidelines:
 - Format responses with Markdown for readability
 - If asked to create something visual/interactive, provide complete, working code
 - Support the user's language preference (respond in the same language they use)`
+
+/* ------------------------------------------------------------------ */
+/*  ToolCallCard — expandable display for tool_use / tool_result       */
+/* ------------------------------------------------------------------ */
+
+function ToolCallCard({
+  call,
+  lang,
+}: {
+  call: {
+    id: string
+    name: string
+    input: unknown
+    result?: string
+    isError?: boolean
+  }
+  lang: "zh-TW" | "en"
+}) {
+  const [open, setOpen] = useState(false)
+  const inputPreview = (() => {
+    try {
+      const json = JSON.stringify(call.input)
+      return json.length > 60 ? json.slice(0, 60) + "…" : json
+    } catch {
+      return "(input)"
+    }
+  })()
+  return (
+    <div
+      className={cn(
+        "rounded-lg border text-xs",
+        call.isError
+          ? "border-red-500/30 bg-red-900/10"
+          : "border-white/10 bg-white/3",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/5 transition-colors"
+      >
+        <span className="text-[10px]">🔧</span>
+        <span className="font-mono font-semibold text-white/80">{call.name}</span>
+        <span className="text-[10px] text-white/40 font-mono truncate flex-1">
+          {inputPreview}
+        </span>
+        {call.isError && (
+          <span className="text-[9px] text-red-300 uppercase">
+            {lang === "en" ? "error" : "錯誤"}
+          </span>
+        )}
+        <span className="text-[10px] text-white/30">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2 text-[11px] space-y-1.5 border-t border-white/5 pt-1.5">
+          <div>
+            <div className="text-white/40 uppercase text-[9px] mb-0.5">
+              {lang === "en" ? "input" : "輸入"}
+            </div>
+            <pre className="bg-black/30 rounded p-1.5 text-white/70 overflow-x-auto font-mono text-[10px] whitespace-pre-wrap">
+              {(() => {
+                try {
+                  return JSON.stringify(call.input, null, 2)
+                } catch {
+                  return String(call.input)
+                }
+              })()}
+            </pre>
+          </div>
+          {call.result !== undefined && (
+            <div>
+              <div className="text-white/40 uppercase text-[9px] mb-0.5">
+                {lang === "en" ? "result" : "結果"}
+              </div>
+              <pre className="bg-black/30 rounded p-1.5 text-white/70 overflow-x-auto font-mono text-[10px] whitespace-pre-wrap max-h-40">
+                {call.result.slice(0, 3000)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------ */
 /*  MessageBubble                                                      */
@@ -278,6 +385,29 @@ function MessageBubble({
               alt="Attached"
               className="max-w-xs max-h-48 rounded-lg mb-2 border border-white/10"
             />
+          )}
+          {/* Attached non-image file chip */}
+          {message.fileName && (
+            <div className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 mb-2">
+              <span className="text-xs">
+                {message.fileMimeType === "application/pdf" ? "📄" : "📎"}
+              </span>
+              <span className="text-xs text-white/70">{message.fileName}</span>
+            </div>
+          )}
+          {/* Routing decision label (Auto mode) */}
+          {!isUser && message.routingReason && (
+            <div className="text-[10px] text-violet-300/70 mb-1.5 font-mono">
+              ⚡ {message.routingReason}
+            </div>
+          )}
+          {/* Tool calls executed this turn */}
+          {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {message.toolCalls.map((tc) => (
+                <ToolCallCard key={tc.id} call={tc} lang={lang} />
+              ))}
+            </div>
           )}
           <div
             className="prose prose-invert prose-sm max-w-none
@@ -873,36 +1003,9 @@ function guessCategory(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Smart Web Search — heuristic gate                                  */
+/*  Web search is now model-driven via native tool calling              */
+/*  (see client/src/lib/tools/builtin/webSearch.ts + runToolLoop)       */
 /* ------------------------------------------------------------------ */
-
-function needsWebSearch(msg: string): "yes" | "no" | "maybe" {
-  const trimmed = msg.trim()
-  // Skip: very short messages, greetings, code-only
-  if (trimmed.length < 10) return "no"
-  if (/^(hi|hello|hey|你好|嗨|哈囉|謝謝|thanks|ok|好的)\b/i.test(trimmed)) return "no"
-  if (/^```[\s\S]*```$/.test(trimmed)) return "no"
-  // Skip: conversation meta / code tasks
-  if (/^(summarize|explain|翻譯|整理|摘要|重寫|改寫|幫我寫|write me|debug|fix|refactor)/i.test(trimmed)) return "no"
-
-  // Search: user provides a URL — fetch it (handled separately, but flag yes for doSearch gate)
-  if (/https?:\/\//i.test(trimmed)) return "yes"
-
-  // Search: explicit intent (EN)
-  if (/\b(search|search for|look up|look it up|find out|google|browse|check online|research|find me)\b/i.test(trimmed)) return "yes"
-  // Search: explicit intent (ZH)
-  if (/(搜尋|搜索|查詢|查一下|搜一下|上網|上網查|幫我查|網上|網路上|去查|查找|搜一搜|查查|幫查|幫我搜)/.test(trimmed)) return "yes"
-
-  // Search: temporal markers
-  if (/\b(最新|today|yesterday|昨天|今天|2025|2026|目前|currently|latest|recent|now|update on|what's new)\b/i.test(trimmed)) return "yes"
-  // Search: factual questions
-  if (/^(who |what is|what are|what was|where |when |how much|how many|how to|is there|are there|tell me about)/i.test(trimmed)) return "yes"
-  if (/^(誰|什麼是|哪裡|多少|幾|怎麼|有沒有|是否|哪個|哪些|告訴我)/.test(trimmed)) return "yes"
-  // Search: prices, weather, news, events, products
-  if (/\b(price|pricing|股價|天氣|weather|news|新聞|匯率|exchange rate|score|比分|release date|發售|上市|開賣|評價|review|比較|compare|vs|versus)\b/i.test(trimmed)) return "yes"
-
-  return "maybe"
-}
 
 /* ------------------------------------------------------------------ */
 /*  Global pending AI responses (survives tab switches / unmounts)      */
@@ -1014,6 +1117,8 @@ export default function ChatInterface({
     mimeType: string
     preview: string
   } | null>(null)
+  // File attachment state (non-image)
+  const [pendingFile, setPendingFile] = useState<AttachedFile | null>(null)
   // Voice state
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
@@ -1353,16 +1458,51 @@ export default function ChatInterface({
     reader.readAsDataURL(file)
   }, [lang])
 
+  // ── File upload handler (PDF / text / code) ──
+  const handleFileUpload = useCallback(
+    async (file: File) => {
+      try {
+        const modelForPrep =
+          settings.selectedModelId === "auto"
+            ? settings.routingPrefs.defaults.balanced
+            : settings.selectedModelId
+        const prepared = await prepareAttachment(
+          file,
+          modelForPrep,
+          settings.fileUploadMaxMB,
+        )
+        setPendingFile(prepared)
+        toast.success(
+          lang === "en"
+            ? `File attached: ${prepared.name}`
+            : `檔案已附加：${prepared.name}`,
+        )
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "File upload failed",
+        )
+      }
+    },
+    [
+      lang,
+      settings.selectedModelId,
+      settings.fileUploadMaxMB,
+      settings.routingPrefs.defaults.balanced,
+    ],
+  )
+
   const handleSend = async () => {
     if (isMergedBranch) return // Merged branches are read-only
     const trimmed = input.trim()
-    if (!trimmed && !pendingImage) return
+    if (!trimmed && !pendingImage && !pendingFile) return
 
     const sanitized = sanitizeText(trimmed || (lang === "en" ? "What's in this image?" : "這張圖片裡有什麼？"), 4096)
 
-    // Capture and clear pending image
+    // Capture and clear pending image / file
     const currentImage = pendingImage
     setPendingImage(null)
+    const currentFile = pendingFile
+    setPendingFile(null)
 
     if (!canSend) {
       toast.error(
@@ -1399,6 +1539,12 @@ export default function ChatInterface({
       ...(currentImage && {
         imageData: currentImage.base64,
         imageMimeType: currentImage.mimeType,
+      }),
+      ...(currentFile && {
+        fileData: currentFile.base64,
+        fileMimeType: currentFile.mimeType,
+        fileName: currentFile.name,
+        fileHandling: currentFile.handling,
       }),
     }
     setAllMessages((prev) => [...prev, userMsg])
@@ -1513,107 +1659,11 @@ export default function ChatInterface({
       }
     }
 
-    // ── Web search integration — smart gate ──
-    let webContext = ""
-    let doSearch = false
-    if (settings.webSearchEnabled && detectedUrls.length === 0) {
-      const verdict = needsWebSearch(trimmed)
-      if (verdict === "yes") {
-        doSearch = true
-      } else if (verdict === "maybe") {
-        // Tier 2: Quick AI classify
-        try {
-          const classifyResult = await callAI(
-            [{ role: "user", content: `Does this user message need real-time web information to answer properly? Answer only "yes" or "no".\n\nMessage: "${trimmed}"` }],
-            settings.selectedModelId,
-            fallbackKey,
-            0,
-            10,
-            "Output only yes or no.",
-          )
-          doSearch = /yes/i.test(classifyResult.trim())
-        } catch {
-          // On classify failure, err on the side of searching
-          doSearch = true
-        }
-      }
-    }
-    if (doSearch) {
-      try {
-        // Step 1: Ask AI to generate search queries
-        const searchQueryPrompt = `Based on this user message, generate 1-2 concise search queries to find relevant information. Return ONLY the queries, one per line, no numbering, no quotes, nothing else:\n\n"${trimmed}"`
-
-        const searchQueries = await callAI(
-          [{ role: "user", content: searchQueryPrompt }],
-          settings.selectedModelId,
-          fallbackKey,
-          0.3,
-          100,
-          "Output only search queries, one per line. No numbering, no quotes, no explanation.",
-        )
-
-        // Step 2: Use server-side search proxy
-        const queries = searchQueries
-          .split("\n")
-          .map((q) => q.replace(/^[\d.\-*]+[.)]\s*/, "").replace(/^["'`]|["'`]$/g, "").trim())
-          .filter((q) => q.length > 3 && !q.startsWith("{") && !q.startsWith("//"))
-          .slice(0, 2)
-
-        if (queries.length > 0) {
-          toast.info(
-            lang === "en"
-              ? `Searching: ${queries[0].slice(0, 50)}...`
-              : `搜尋中：${queries[0].slice(0, 50)}...`,
-            { duration: 2000 },
-          )
-
-          for (const query of queries) {
-            try {
-              const searchRes = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`)
-              if (searchRes.ok) {
-                const searchData = await searchRes.json()
-                if (searchData.results && searchData.results.length > 0) {
-                  const parts = searchData.results.map(
-                    (r: { title: string; snippet: string; url: string }) =>
-                      `• ${r.title}\n  ${r.snippet}${r.url ? `\n  Source: ${r.url}` : ""}`
-                  )
-                  const cleaned = parts.join("\n\n").slice(0, 3000)
-                  webContext += `\n\n[Web Search: "${query.trim()}"]\n${cleaned}`
-                }
-              }
-            } catch { /* continue */ }
-          }
-        }
-
-        if (webContext) {
-          toast.info(
-            lang === "en"
-              ? `Web results added to context`
-              : `已加入網路搜尋結果`,
-            { duration: 2000 },
-          )
-        } else {
-          toast.warning(
-            lang === "en"
-              ? "Web search returned no results"
-              : "網路搜尋未找到結果",
-            { duration: 2000 },
-          )
-        }
-      } catch (err) {
-        console.warn("Web search failed:", err)
-        toast.warning(
-          lang === "en"
-            ? "Web search failed"
-            : "網路搜尋失敗",
-          { duration: 2000 },
-        )
-      }
-    }
-
-    // Build web/url instruction for the AI — strong directive to use retrieved data
-    const webAndUrlContext = (urlContext || webContext)
-      ? `\n\n=== LIVE WEB DATA (MANDATORY — YOU MUST USE THIS) ===\nThe following information was just retrieved from the internet in real-time. This is FRESH, REAL data — NOT from your training data.\n\nCRITICAL RULES:\n1. You MUST base your answer primarily on this retrieved data\n2. You MUST cite the source URLs when available\n3. Do NOT rely on your training data for facts covered by this web data\n4. If the web data contradicts your training data, trust the web data\n5. If the web data doesn't fully answer the question, say so honestly\n${urlContext}${webContext}\n=== END LIVE WEB DATA ===`
+    // Web search is delegated to the model via the web_search tool when the
+    // tool loop runs. Pre-fetched URL content (from user-pasted links) still
+    // gets inlined here so the model doesn't have to re-fetch them.
+    const webAndUrlContext = urlContext
+      ? `\n\n=== LIVE WEB DATA (retrieved from user-provided URLs) ===\nUse this verbatim where relevant; cite source URLs.\n${urlContext}\n=== END LIVE WEB DATA ===`
       : ""
 
     // Inject conversation memory (branch-isolated)
@@ -1643,48 +1693,228 @@ export default function ChatInterface({
       const abort = new AbortController()
       abortRef.current = abort
 
+      const buildHistoryParts = (m: Message): ContentPart[] | string => {
+        const parts: ContentPart[] = []
+        if (m.content) parts.push({ type: "text", text: m.content })
+        if (m.imageData && m.imageMimeType)
+          parts.push({
+            type: "image",
+            base64: m.imageData,
+            mimeType: m.imageMimeType,
+          })
+        if (m.fileData && m.fileMimeType && m.fileName) {
+          if (m.fileHandling === "native") {
+            parts.push({
+              type: "file",
+              base64: m.fileData,
+              mimeType: m.fileMimeType,
+              name: m.fileName,
+            })
+          }
+          // For "text" handling the extracted text was already inlined into
+          // m.content at send time, so no file part needed here.
+        }
+        return parts.length <= 1 && parts[0]?.type === "text"
+          ? parts[0].text
+          : parts
+      }
+
       const chatHistory: ChatMessage[] = visibleMessages.map((m) => ({
         role: m.role,
-        content: m.imageData && m.imageMimeType
-          ? [
-              { type: "text" as const, text: m.content },
-              { type: "image" as const, base64: m.imageData, mimeType: m.imageMimeType },
-            ]
-          : m.content,
+        content: buildHistoryParts(m),
       }))
+
+      // Build the new user message with optional image + file attachments.
+      const userParts: ContentPart[] = []
+      const userTextPieces: string[] = [userMsg.content]
+      if (currentFile?.handling === "text" && currentFile.extractedText) {
+        userTextPieces.push(
+          `\n\n--- Attached file: ${currentFile.name} ---\n${currentFile.extractedText}`,
+        )
+      }
+      userParts.push({ type: "text", text: userTextPieces.join("") })
+      if (currentImage) {
+        userParts.push({
+          type: "image",
+          base64: currentImage.base64,
+          mimeType: currentImage.mimeType,
+        })
+      }
+      if (currentFile?.handling === "native") {
+        userParts.push({
+          type: "file",
+          base64: currentFile.base64,
+          mimeType: currentFile.mimeType,
+          name: currentFile.name,
+        })
+      }
+      const singleTextPart =
+        userParts.length === 1 && userParts[0].type === "text"
+          ? userParts[0].text
+          : null
       chatHistory.push({
         role: "user",
-        content: currentImage
-          ? [
-              { type: "text" as const, text: userMsg.content },
-              { type: "image" as const, base64: currentImage.base64, mimeType: currentImage.mimeType },
-            ]
-          : userMsg.content,
+        content: singleTextPart ?? userParts,
       })
 
-      const aiPromise = callAI(
-        chatHistory,
-        settings.selectedModelId,
-        fallbackKey,
-        effectiveTemperature,
-        settings.maxTokens,
-        fullSystemPrompt,
-        abort.signal,
-      )
+      // [PHASE-4] Auto-routing: resolve effective model id if user picked "auto"
+      let effectiveModelId = settings.selectedModelId
+      let routingReason: string | undefined
+      if (settings.selectedModelId === "auto") {
+        try {
+          const availableIds = new Set<string>()
+          for (const p of MODEL_PROVIDERS) {
+            if (hasApiKey(p.id)) {
+              for (const m of p.models) availableIds.add(m.id)
+            }
+          }
+          for (const cm of settings.customModels) {
+            if (hasApiKey(cm.providerId)) availableIds.add(cm.id)
+          }
+          const totalChars = chatHistory.reduce((n, m) => {
+            if (typeof m.content === "string") return n + m.content.length
+            return (
+              n +
+              m.content
+                .filter((p) => p.type === "text")
+                .reduce((s, p) => s + (p as { text: string }).text.length, 0)
+            )
+          }, 0)
+          const decision = await pickModel(
+            {
+              text: trimmed,
+              hasImage: !!currentImage,
+              hasPdf: currentFile?.mimeType === "application/pdf",
+              hasOtherFile:
+                !!currentFile &&
+                currentFile.mimeType !== "application/pdf",
+              totalHistoryTokens: estimateTokens(" ".repeat(totalChars)),
+              availableModelIds: availableIds,
+            },
+            settings.routingPrefs,
+            { fallbackApiKey: fallbackKey, signal: abort.signal },
+          )
+          effectiveModelId = decision.modelId
+          routingReason = `${decision.bucket} · ${decision.reason}`
+        } catch (err) {
+          console.warn("[router] failed, falling back to balanced:", err)
+          effectiveModelId = settings.routingPrefs.defaults.balanced
+          routingReason = "router error — balanced fallback"
+        }
+      }
 
-      // Register globally so response survives tab switches
-      pendingResponses.set(effectiveConvId, {
-        convId: effectiveConvId,
-        promise: aiPromise,
-        abort,
+      // [PHASE-1+2] Collect tools: builtin (gated by settings) + MCP
+      let tools: Tool[] = []
+      if (settings.toolUseEnabled) {
+        const builtin = getBuiltinTools({
+          toolUseEnabled: settings.toolUseEnabled,
+          enabledTools: settings.enabledTools,
+          webSearchEnabled: settings.webSearchEnabled,
+        })
+        let mcp: Tool[] = []
+        if (settings.mcpEnabled) {
+          try {
+            mcp = await getMcpTools({
+              enabled: true,
+              onServerError: (serverName, error) =>
+                console.warn(`[MCP] ${serverName}: ${error}`),
+            })
+          } catch (err) {
+            console.warn("[MCP] tool list failed:", err)
+          }
+        }
+        tools = mergeTools(builtin, mcp)
+      }
+
+      // Branch on tool availability: tool loop vs legacy plain call.
+      const toolCtx: ToolContext = {
         userId: effectiveUserId,
-        modelId: settings.selectedModelId,
-        branchId: activeBranchId,
-        userMsg,
-      })
+        conversationId: effectiveConvId,
+        signal: abort.signal,
+        fallbackApiKey: fallbackKey,
+      }
 
-      const response = await aiPromise
-      pendingResponses.delete(effectiveConvId)
+      let response: string
+      let executedToolCalls: Message["toolCalls"] = []
+
+      if (tools.length > 0) {
+        const loopPromise = runToolLoop(chatHistory, {
+          modelId: effectiveModelId,
+          fallbackApiKey: fallbackKey,
+          temperature: effectiveTemperature,
+          maxTokens: settings.maxTokens,
+          systemPrompt: fullSystemPrompt,
+          signal: abort.signal,
+          tools,
+          toolContext: toolCtx,
+          maxRounds: settings.maxToolRounds,
+          onToolCall: (info) => {
+            toast.info(
+              lang === "en"
+                ? `🔧 ${info.name}`
+                : `🔧 使用工具：${info.name}`,
+              { duration: 1500 },
+            )
+          },
+        })
+        pendingResponses.set(effectiveConvId, {
+          convId: effectiveConvId,
+          promise: loopPromise.then((r) => r.text),
+          abort,
+          userId: effectiveUserId,
+          modelId: effectiveModelId,
+          branchId: activeBranchId,
+          userMsg,
+        })
+        const loopResult = await loopPromise
+        pendingResponses.delete(effectiveConvId)
+        response = loopResult.text
+        executedToolCalls = loopResult.toolUseParts.map((p) => {
+          const tu = p as Extract<ContentPart, { type: "tool_use" }>
+          const matchingResult = loopResult.toolResultParts.find(
+            (r) =>
+              (r as Extract<ContentPart, { type: "tool_result" }>)
+                .toolCallId === tu.id,
+          ) as
+            | Extract<ContentPart, { type: "tool_result" }>
+            | undefined
+          return {
+            id: tu.id,
+            name: tu.name,
+            input: tu.input,
+            result: matchingResult?.content,
+            isError: matchingResult?.isError,
+          }
+        })
+        if (loopResult.truncated) {
+          toast.warning(
+            lang === "en"
+              ? "Tool budget exhausted"
+              : "工具呼叫次數已達上限",
+          )
+        }
+      } else {
+        const aiPromise = callAI(
+          chatHistory,
+          effectiveModelId,
+          fallbackKey,
+          effectiveTemperature,
+          settings.maxTokens,
+          fullSystemPrompt,
+          abort.signal,
+        )
+        pendingResponses.set(effectiveConvId, {
+          convId: effectiveConvId,
+          promise: aiPromise,
+          abort,
+          userId: effectiveUserId,
+          modelId: effectiveModelId,
+          branchId: activeBranchId,
+          userMsg,
+        })
+        response = await aiPromise
+        pendingResponses.delete(effectiveConvId)
+      }
 
       setIsTyping(false)
       const aiMsg: Message = {
@@ -1695,8 +1925,12 @@ export default function ChatInterface({
           hour: "2-digit",
           minute: "2-digit",
         }),
-        model: settings.selectedModelId,
+        model: effectiveModelId,
         branchId: activeBranchId,
+        ...(executedToolCalls && executedToolCalls.length > 0
+          ? { toolCalls: executedToolCalls }
+          : {}),
+        ...(routingReason ? { routingReason } : {}),
       }
       setAllMessages((prev) => [...prev, aiMsg])
 
@@ -2366,29 +2600,11 @@ export default function ChatInterface({
                         const file = (
                           ev.target as HTMLInputElement
                         ).files?.[0]
-                        if (file) {
-                          if (item.accept === "image/*") {
-                            // Image upload → base64 for vision
-                            handleImageUpload(file)
-                          } else {
-                            toast.success(
-                              lang === "en"
-                                ? `Selected: ${file.name}`
-                                : `已選取：${file.name}`,
-                            )
-                            // Read text files and append to input
-                            const reader = new FileReader()
-                            reader.onload = () => {
-                              const content =
-                                reader.result as string
-                              setInput(
-                                (prev) =>
-                                  prev +
-                                  `\n\n[${lang === "en" ? "Attachment" : "附件"}: ${file.name}]\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``,
-                              )
-                            }
-                            reader.readAsText(file)
-                          }
+                        if (!file) return
+                        if (item.accept === "image/*") {
+                          handleImageUpload(file)
+                        } else {
+                          void handleFileUpload(file)
                         }
                       }
                       fileInput.click()
@@ -2425,6 +2641,33 @@ export default function ChatInterface({
               <span className="text-[10px] text-white/30 mt-1">
                 {lang === "en" ? "Image attached" : "已附加圖片"}
               </span>
+            </div>
+          )}
+
+          {/* Pending file (PDF / text / code) preview */}
+          {pendingFile && (
+            <div className="px-3 pt-3 flex items-start gap-2">
+              <div className="relative px-3 py-2 rounded-lg border border-white/10 bg-white/5 flex items-center gap-2">
+                <span className="text-xs">
+                  {pendingFile.mimeType === "application/pdf" ? "📄" : "📎"}
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-xs text-white/80 max-w-[200px] truncate">
+                    {pendingFile.name}
+                  </span>
+                  <span className="text-[10px] text-white/40">
+                    {pendingFile.handling === "native"
+                      ? lang === "en" ? "native" : "原生支援"
+                      : lang === "en" ? "text extracted" : "已擷取文字"}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setPendingFile(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500/90 flex items-center justify-center text-white hover:bg-red-400 transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -2592,10 +2835,10 @@ export default function ChatInterface({
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim() && !pendingImage}
+                disabled={!input.trim() && !pendingImage && !pendingFile}
                 className={cn(
                   "p-2 rounded-xl transition-all duration-150 shrink-0",
-                  input.trim() || pendingImage
+                  input.trim() || pendingImage || pendingFile
                     ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/40"
                     : "text-white/20 bg-white/5 cursor-not-allowed",
                 )}

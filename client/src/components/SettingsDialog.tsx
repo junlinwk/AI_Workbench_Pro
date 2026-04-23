@@ -2,13 +2,13 @@
  * SettingsDialog — Full-featured settings modal
  * Includes: General, Appearance, Chat, Models & API Keys, Privacy, About
  */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   X, Settings, Palette, MessageSquare, Key, Shield, Info,
   Sun, Moon, Monitor, Check, ChevronRight, Eye, EyeOff,
   RotateCcw, Download, Upload, Volume2, VolumeX, Trash2,
   Globe, Type, Sparkles, Plus, ChevronDown, UserCircle,
-  Crown, Zap, Star, Copy, ExternalLink,
+  Crown, Zap, Star, Copy, ExternalLink, Wrench, Server, GitBranch, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, ThemeMode, Language, SendKey, FontSize, MessageDensity, MembershipTier } from "@/contexts/SettingsContext";
@@ -17,14 +17,33 @@ import { useAuth } from "@/contexts/AuthContext";
 import { clearAllUserData } from "@/lib/storage";
 import { t } from "@/i18n";
 import { toast } from "sonner";
-import { MODEL_PROVIDERS, ProviderIcon, type ModelProvider } from "./ModelSwitcher";
+import { MODEL_PROVIDERS, ProviderIcon, type ModelProvider, ALL_MODELS } from "./ModelSwitcher";
+import {
+  listMcpServers,
+  upsertMcpServer,
+  deleteMcpServer,
+  listMcpTools,
+  type McpServerSummary,
+} from "@/lib/mcp/client";
 
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = "general" | "appearance" | "chat" | "profile" | "membership" | "models" | "privacy" | "about";
+type SettingsTab =
+  | "general"
+  | "appearance"
+  | "chat"
+  | "profile"
+  | "membership"
+  | "models"
+  | "tools"
+  | "mcp"
+  | "routing"
+  | "files"
+  | "privacy"
+  | "about";
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -1082,6 +1101,383 @@ function MembershipTab() {
   );
 }
 
+/* ============================================================== *
+ *  Tools tab — builtin tool flags + master switch                  *
+ * ============================================================== */
+
+const BUILTIN_TOOL_KEYS: { key: string; labelEn: string; labelZh: string; desc: string }[] = [
+  { key: "web_search", labelEn: "Web Search", labelZh: "網路搜尋", desc: "Lets the model search the web on its own." },
+  { key: "fetch_url", labelEn: "Fetch URL", labelZh: "擷取網址", desc: "Retrieve content from a URL." },
+  { key: "memory_add", labelEn: "Memory Add", labelZh: "記憶新增", desc: "Persist a new memory node." },
+  { key: "memory_query", labelEn: "Memory Query", labelZh: "記憶查詢", desc: "Search existing memories." },
+];
+
+function ToolsTab() {
+  const { settings, updateSetting } = useSettings();
+  const lang = settings.language;
+
+  const setFlag = (name: string, v: boolean) => {
+    updateSetting("enabledTools", { ...settings.enabledTools, [name]: v });
+  };
+
+  return (
+    <div className="space-y-6">
+      <SettingRow
+        label={lang === "en" ? "Enable tool use" : "啟用工具呼叫"}
+        description={lang === "en"
+          ? "Master switch. When off, the model never receives any tools."
+          : "總開關，關閉時模型不會收到任何工具。"}
+      >
+        <ToggleSwitch
+          checked={settings.toolUseEnabled}
+          onChange={v => updateSetting("toolUseEnabled", v)}
+        />
+      </SettingRow>
+      <SettingRow
+        label={lang === "en" ? "Max tool-call rounds" : "工具呼叫輪次上限"}
+        description={lang === "en"
+          ? "Prevents infinite tool loops. Default 8, max 32."
+          : "預防無限工具迴圈。預設 8，最多 32。"}
+      >
+        <input
+          type="number"
+          min={1}
+          max={32}
+          value={settings.maxToolRounds}
+          onChange={e => {
+            const n = parseInt(e.target.value, 10);
+            if (Number.isFinite(n) && n >= 1 && n <= 32) {
+              updateSetting("maxToolRounds", n);
+            }
+          }}
+          className="w-16 px-2 py-1 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+        />
+      </SettingRow>
+      <div>
+        <div className="text-xs text-white/50 uppercase tracking-wider mb-2 mt-4">
+          {lang === "en" ? "Built-in tools" : "內建工具"}
+        </div>
+        {BUILTIN_TOOL_KEYS.map(tk => (
+          <SettingRow
+            key={tk.key}
+            label={lang === "en" ? tk.labelEn : tk.labelZh}
+            description={tk.desc}
+          >
+            <ToggleSwitch
+              checked={settings.enabledTools[tk.key] !== false}
+              onChange={v => setFlag(tk.key, v)}
+            />
+          </SettingRow>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================== *
+ *  MCP tab — server list CRUD                                      *
+ * ============================================================== */
+
+function McpTab() {
+  const { settings, updateSetting } = useSettings();
+  const lang = settings.language;
+  const [servers, setServers] = useState<McpServerSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", url: "", authHeader: "" });
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listMcpServers();
+      setServers(list);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const handleAdd = async () => {
+    if (!form.name.trim() || !form.url.trim()) return;
+    const created = await upsertMcpServer({
+      name: form.name.trim(),
+      url: form.url.trim(),
+      authHeader: form.authHeader.trim() || undefined,
+      enabled: true,
+    });
+    if (created) {
+      setForm({ name: "", url: "", authHeader: "" });
+      setShowAdd(false);
+      await refresh();
+      toast.success(lang === "en" ? "MCP server added" : "已新增 MCP 伺服器");
+    } else {
+      toast.error(lang === "en" ? "Failed to add server" : "新增失敗");
+    }
+  };
+
+  const handleToggle = async (s: McpServerSummary) => {
+    const updated = await upsertMcpServer({ id: s.id, name: s.name, url: s.url, enabled: !s.enabled });
+    if (updated) await refresh();
+  };
+
+  const handleDelete = async (s: McpServerSummary) => {
+    const ok = await deleteMcpServer(s.id);
+    if (ok) {
+      await refresh();
+      toast.success(lang === "en" ? "Server removed" : "已刪除");
+    }
+  };
+
+  const handleTest = async (s: McpServerSummary) => {
+    toast.info(lang === "en" ? "Testing…" : "測試連線中…");
+    const r = await listMcpTools(s.id);
+    if ("error" in r) {
+      toast.error(`${s.name}: ${r.error}`);
+    } else {
+      toast.success(
+        lang === "en"
+          ? `${s.name}: ${r.tools.length} tools`
+          : `${s.name}：${r.tools.length} 個工具`,
+      );
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <SettingRow
+        label={lang === "en" ? "Enable MCP servers" : "啟用 MCP 伺服器"}
+        description={lang === "en"
+          ? "HTTP/SSE transport only (stdio not supported on serverless)."
+          : "僅支援 HTTP/SSE，無 stdio（serverless 限制）。"}
+      >
+        <ToggleSwitch
+          checked={settings.mcpEnabled}
+          onChange={v => updateSetting("mcpEnabled", v)}
+        />
+      </SettingRow>
+
+      <div className="flex items-center justify-between pt-2">
+        <div className="text-xs text-white/50 uppercase tracking-wider">
+          {lang === "en" ? "Servers" : "伺服器"}
+        </div>
+        <button
+          onClick={() => setShowAdd(v => !v)}
+          className="text-xs px-2.5 py-1 rounded-md bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 transition-colors inline-flex items-center gap-1"
+        >
+          <Plus size={12} />
+          {lang === "en" ? "Add" : "新增"}
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="space-y-2 p-3 border border-white/10 rounded-lg bg-white/3">
+          <input
+            type="text"
+            placeholder={lang === "en" ? "Name" : "名稱"}
+            value={form.name}
+            onChange={e => setForm({ ...form, name: e.target.value })}
+            className="w-full px-2.5 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+          />
+          <input
+            type="url"
+            placeholder="https://example.com/mcp"
+            value={form.url}
+            onChange={e => setForm({ ...form, url: e.target.value })}
+            className="w-full px-2.5 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+          />
+          <input
+            type="text"
+            placeholder={lang === "en" ? "Authorization header (optional)" : "Authorization 標頭（選填）"}
+            value={form.authHeader}
+            onChange={e => setForm({ ...form, authHeader: e.target.value })}
+            className="w-full px-2.5 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleAdd}
+              className="px-3 py-1 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-500"
+            >
+              {lang === "en" ? "Save" : "儲存"}
+            </button>
+            <button
+              onClick={() => setShowAdd(false)}
+              className="px-3 py-1 text-xs rounded-md bg-white/5 text-white/60 hover:bg-white/10"
+            >
+              {lang === "en" ? "Cancel" : "取消"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {loading && <div className="text-xs text-white/40">{lang === "en" ? "Loading…" : "載入中…"}</div>}
+        {!loading && servers.length === 0 && (
+          <div className="text-xs text-white/40 py-4 text-center">
+            {lang === "en" ? "No servers configured." : "尚未設定伺服器。"}
+          </div>
+        )}
+        {servers.map(s => (
+          <div
+            key={s.id}
+            className="flex items-center gap-2 p-2.5 border border-white/10 rounded-lg bg-white/3"
+          >
+            <ToggleSwitch checked={s.enabled} onChange={() => handleToggle(s)} />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-white/85 font-medium truncate">{s.name}</div>
+              <div className="text-[10px] text-white/40 font-mono truncate">{s.url}</div>
+              {s.auth_hint && (
+                <div className="text-[10px] text-white/30 font-mono">auth: {s.auth_hint}</div>
+              )}
+            </div>
+            <button
+              onClick={() => handleTest(s)}
+              className="text-[10px] px-2 py-1 rounded text-white/50 hover:text-white/80 hover:bg-white/5 transition-colors"
+              title={lang === "en" ? "Test connection" : "測試連線"}
+            >
+              {lang === "en" ? "Test" : "測試"}
+            </button>
+            <button
+              onClick={() => handleDelete(s)}
+              className="p-1 rounded text-white/30 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================== *
+ *  Routing tab — auto-routing config                               *
+ * ============================================================== */
+
+function RoutingTab() {
+  const { settings, updateSetting } = useSettings();
+  const lang = settings.language;
+  const r = settings.routingPrefs;
+
+  const updateBucket = (bucket: keyof typeof r.defaults, modelId: string) => {
+    updateSetting("routingPrefs", {
+      ...r,
+      defaults: { ...r.defaults, [bucket]: modelId },
+    });
+  };
+
+  const modelOptions = ALL_MODELS.map(m => ({ value: m.id, label: m.name }));
+
+  return (
+    <div className="space-y-4">
+      <SettingRow
+        label={lang === "en" ? "Routing mode" : "路由模式"}
+        description={lang === "en"
+          ? "heuristic = free rules only. ai-assisted adds a cheap classifier call when rules are inconclusive."
+          : "heuristic = 僅用規則。ai-assisted = 規則無結論時再呼叫便宜模型分類。"}
+      >
+        <SelectButton<"heuristic" | "ai-assisted">
+          value={r.mode}
+          onChange={v => updateSetting("routingPrefs", { ...r, mode: v })}
+          options={[
+            { value: "heuristic", label: lang === "en" ? "Heuristic" : "規則" },
+            { value: "ai-assisted", label: lang === "en" ? "AI-assisted" : "AI 協助" },
+          ]}
+        />
+      </SettingRow>
+
+      {r.mode === "ai-assisted" && (
+        <SettingRow
+          label={lang === "en" ? "Classifier model" : "分類模型"}
+          description={lang === "en" ? "Cheap model used for tier-2 routing." : "進行二階分類的便宜模型。"}
+        >
+          <select
+            value={r.classifierModel}
+            onChange={e => updateSetting("routingPrefs", { ...r, classifierModel: e.target.value })}
+            className="px-2 py-1 text-xs bg-white/5 border border-white/10 rounded text-white/90 max-w-[160px]"
+          >
+            {modelOptions.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </SettingRow>
+      )}
+
+      <div className="text-xs text-white/50 uppercase tracking-wider mt-4 mb-2">
+        {lang === "en" ? "Bucket defaults" : "類別預設模型"}
+      </div>
+
+      {([
+        ["vision", lang === "en" ? "Vision (images)" : "視覺（圖片）"],
+        ["reasoning", lang === "en" ? "Reasoning (hard problems)" : "推理（困難題）"],
+        ["cheap", lang === "en" ? "Cheap (trivial)" : "便宜（瑣事）"],
+        ["longContext", lang === "en" ? "Long context (>50k)" : "長上下文（>50k）"],
+        ["balanced", lang === "en" ? "Balanced (default)" : "平衡（預設）"],
+      ] as [keyof typeof r.defaults, string][]).map(([k, label]) => (
+        <SettingRow key={k} label={label}>
+          <select
+            value={r.defaults[k]}
+            onChange={e => updateBucket(k, e.target.value)}
+            className="px-2 py-1 text-xs bg-white/5 border border-white/10 rounded text-white/90 max-w-[160px]"
+          >
+            {modelOptions.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </SettingRow>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================== *
+ *  Files tab — upload limits                                       *
+ * ============================================================== */
+
+function FilesTab() {
+  const { settings, updateSetting } = useSettings();
+  const lang = settings.language;
+
+  return (
+    <div className="space-y-4">
+      <SettingRow
+        label={lang === "en" ? "Max upload size (MB)" : "上傳大小上限（MB）"}
+        description={lang === "en"
+          ? "PDFs and text/code files are accepted. Images go through a separate path."
+          : "接受 PDF / 文字 / 程式碼檔案，圖片另由視覺流程處理。"}
+      >
+        <input
+          type="number"
+          min={1}
+          max={100}
+          value={settings.fileUploadMaxMB}
+          onChange={e => {
+            const n = parseFloat(e.target.value);
+            if (Number.isFinite(n) && n > 0 && n <= 100) {
+              updateSetting("fileUploadMaxMB", n);
+            }
+          }}
+          className="w-16 px-2 py-1 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+        />
+      </SettingRow>
+      <div className="text-xs text-white/45 leading-relaxed pt-4 border-t border-white/6">
+        <p className="mb-2">
+          {lang === "en"
+            ? "Native PDF support: Claude 4.6 family, Gemini 2.x/3.x. Other models get client-side text extraction."
+            : "原生 PDF 支援：Claude 4.6 系列、Gemini 2.x/3.x。其他模型採客戶端 PDF 文字擷取。"}
+        </p>
+        <p>
+          {lang === "en"
+            ? "Text files (.txt, .md, .csv, .json, .ts, .py, etc.) are read as UTF-8 and inlined."
+            : "文字檔（.txt、.md、.csv、.json、.ts、.py 等）以 UTF-8 讀取並內嵌。"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const { settings } = useSettings();
@@ -1096,6 +1492,10 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     { id: "profile", label: t("settings.profile", lang), icon: <UserCircle size={16} /> },
     { id: "membership", label: t("settings.membership", lang), icon: <Crown size={16} /> },
     { id: "models", label: t("settings.models", lang), icon: <Key size={16} /> },
+    { id: "tools", label: lang === "en" ? "Tools" : "工具", icon: <Wrench size={16} /> },
+    { id: "mcp", label: "MCP", icon: <Server size={16} /> },
+    { id: "routing", label: lang === "en" ? "Routing" : "路由", icon: <GitBranch size={16} /> },
+    { id: "files", label: lang === "en" ? "Files" : "檔案", icon: <FileText size={16} /> },
     { id: "privacy", label: t("settings.privacy", lang), icon: <Shield size={16} /> },
     { id: "about", label: t("settings.about", lang), icon: <Info size={16} /> },
   ];
@@ -1107,6 +1507,10 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     profile: <UserProfileTab />,
     membership: <MembershipTab />,
     models: <ModelsTab />,
+    tools: <ToolsTab />,
+    mcp: <McpTab />,
+    routing: <RoutingTab />,
+    files: <FilesTab />,
     privacy: <PrivacyTab />,
     about: <AboutTab />,
   };

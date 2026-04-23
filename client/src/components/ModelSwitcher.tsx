@@ -161,6 +161,23 @@ export const MODEL_PROVIDERS: ModelProvider[] = [
 
 const BUILT_IN_MODELS: AIModel[] = MODEL_PROVIDERS.flatMap(p => p.models);
 
+/**
+ * "auto" pseudo-model. When selected, the chat pipeline resolves it to a real
+ * model via client/src/lib/modelRouter.ts before each request. We keep it at
+ * the top of the available list and skip the provider grouping for it.
+ */
+export const AUTO_MODEL: AIModel = {
+  id: "auto",
+  name: "Auto",
+  providerId: "auto",
+  description: "系統自動選擇最合適模型",
+  speed: 5,
+  intelligence: 5,
+  badge: "智能",
+  badgeColor: "bg-violet-500/20 text-violet-400 border-violet-500/30",
+  contextWindow: "—",
+};
+
 export function getAllModels(customModels: CustomModel[]): AIModel[] {
   const customAIModels: AIModel[] = customModels.map(cm => ({
     id: cm.id,
@@ -171,10 +188,12 @@ export function getAllModels(customModels: CustomModel[]): AIModel[] {
     intelligence: 3,
     contextWindow: cm.contextWindow,
   }));
-  return [...BUILT_IN_MODELS, ...customAIModels];
+  return [AUTO_MODEL, ...BUILT_IN_MODELS, ...customAIModels];
 }
 
-// Keep ALL_MODELS as a backwards-compatible alias for built-in models
+// Keep ALL_MODELS as a backwards-compatible alias for built-in models.
+// AUTO is intentionally excluded so downstream callers that look up a concrete
+// provider (e.g. callAI) never receive the pseudo-model by accident.
 export const ALL_MODELS: AIModel[] = BUILT_IN_MODELS;
 
 function getProviderById(id: string): ModelProvider | undefined {
@@ -250,9 +269,11 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
   }, [open]);
 
   const handleSelect = (model: AIModel) => {
-    // Custom models don't require provider API key check
+    // Auto and custom models don't require a provider API key check upfront.
+    // Auto resolves to a real model at send time; routing failures fall back.
     const isCustom = settings.customModels.some(cm => cm.id === model.id);
-    if (!isCustom) {
+    const isAuto = model.id === "auto";
+    if (!isCustom && !isAuto) {
       const providerHasKey = hasApiKey(model.providerId);
       if (!providerHasKey) {
         onOpenSettings?.();
@@ -289,10 +310,16 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
         )}
       >
         <div className="flex items-center gap-1.5">
-          {selectedProvider ? <ProviderIcon icon={selectedProvider.icon} darkIcon={selectedProvider.darkIcon} size={18} /> : <span className="text-sm">🔧</span>}
+          {selectedModel.id === "auto" ? (
+            <Sparkles size={16} className="text-violet-400" />
+          ) : selectedProvider ? (
+            <ProviderIcon icon={selectedProvider.icon} darkIcon={selectedProvider.darkIcon} size={18} />
+          ) : (
+            <span className="text-sm">🔧</span>
+          )}
           <span className="text-sm font-medium">{selectedModel.name}</span>
         </div>
-        {!hasKey && !settings.customModels.some(cm => cm.id === selectedModel.id) && (
+        {selectedModel.id !== "auto" && !hasKey && !settings.customModels.some(cm => cm.id === selectedModel.id) && (
           <AlertCircle size={12} className="text-amber-400" />
         )}
         {selectedModel.badge && hasKey && (
@@ -317,6 +344,32 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
             style={{ top: dropdownPos.top, left: dropdownPos.left }}
           >
             <div className="overflow-y-auto flex-1 p-2 space-y-2">
+              {/* Auto pseudo-model — always at the top */}
+              <button
+                onClick={() => handleSelect(AUTO_MODEL)}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors",
+                  settings.selectedModelId === "auto"
+                    ? "bg-violet-500/20 border border-violet-500/40"
+                    : "hover:bg-white/5 dark:hover:bg-white/5 hover:bg-gray-100 border border-transparent",
+                )}
+              >
+                <Sparkles size={14} className="text-violet-400" />
+                <div className="flex-1 text-left">
+                  <div className="text-sm font-semibold text-gray-800 dark:text-white/90">
+                    {lang === "en" ? "Auto" : "自動選擇"}
+                  </div>
+                  <div className="text-[10px] text-gray-400 dark:text-white/40">
+                    {lang === "en"
+                      ? "System picks the best model per message"
+                      : "依訊息內容自動路由"}
+                  </div>
+                </div>
+                {settings.selectedModelId === "auto" && (
+                  <Check size={14} className="text-violet-400" />
+                )}
+              </button>
+
               {MODEL_PROVIDERS.map(provider => {
                 const providerHasKey = hasApiKey(provider.id);
                 const isExpanded = expandedProviders.has(provider.id);

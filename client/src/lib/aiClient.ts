@@ -40,9 +40,22 @@ export interface ImageAttachment {
   mimeType: string // e.g. "image/png"
 }
 
+/**
+ * Canonical content parts. Tool-use and file variants are handled by the
+ * per-provider converters in ./tools/converters.ts — legacy `callAI` only
+ * understands text+image and will degrade other parts to text placeholders.
+ */
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image"; base64: string; mimeType: string }
+  | { type: "file"; base64: string; mimeType: string; name: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | {
+      type: "tool_result"
+      toolCallId: string
+      content: string
+      isError?: boolean
+    }
 
 export type MessageContent = string | ContentPart[]
 
@@ -51,41 +64,58 @@ export interface ChatMessage {
   content: MessageContent
 }
 
-/** Convert ContentPart[] to OpenAI/Groq multimodal format */
+/** Convert ContentPart[] to OpenAI/Groq multimodal format. Legacy path: drops tool parts. */
 function toOpenAIContent(content: MessageContent) {
   if (typeof content === "string") return content
-  return content.map((part) => {
-    if (part.type === "text") return { type: "text" as const, text: part.text }
-    return {
-      type: "image_url" as const,
-      image_url: { url: `data:${part.mimeType};base64,${part.base64}` },
-    }
-  })
+  const out: Array<Record<string, unknown>> = []
+  for (const part of content) {
+    if (part.type === "text") out.push({ type: "text", text: part.text })
+    else if (part.type === "image")
+      out.push({
+        type: "image_url",
+        image_url: { url: `data:${part.mimeType};base64,${part.base64}` },
+      })
+    else if (part.type === "file")
+      out.push({ type: "text", text: `[file: ${part.name}]` })
+    // tool_use / tool_result: dropped in legacy path
+  }
+  return out.length > 0 ? out : ""
 }
 
-/** Convert ContentPart[] to Anthropic multimodal format */
+/** Convert ContentPart[] to Anthropic multimodal format. Legacy path: drops tool parts. */
 function toAnthropicContent(content: MessageContent) {
   if (typeof content === "string") return content
-  return content.map((part) => {
-    if (part.type === "text") return { type: "text" as const, text: part.text }
-    return {
-      type: "image" as const,
-      source: {
-        type: "base64" as const,
-        media_type: part.mimeType,
-        data: part.base64,
-      },
+  const out: Array<Record<string, unknown>> = []
+  for (const part of content) {
+    if (part.type === "text") {
+      out.push({ type: "text", text: part.text })
+    } else if (part.type === "image") {
+      out.push({
+        type: "image",
+        source: { type: "base64", media_type: part.mimeType, data: part.base64 },
+      })
+    } else if (part.type === "file" && part.mimeType === "application/pdf") {
+      out.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: part.base64 },
+      })
+    } else if (part.type === "file") {
+      out.push({ type: "text", text: `[file: ${part.name}]` })
     }
-  })
+  }
+  return out.length > 0 ? out : ""
 }
 
-/** Convert ContentPart[] to Google Gemini multimodal format */
+/** Convert ContentPart[] to Google Gemini multimodal format. Legacy path: drops tool parts. */
 function toGoogleParts(content: MessageContent) {
   if (typeof content === "string") return [{ text: content }]
-  return content.map((part) => {
-    if (part.type === "text") return { text: part.text }
-    return { inline_data: { mime_type: part.mimeType, data: part.base64 } }
-  })
+  const out: Array<Record<string, unknown>> = []
+  for (const part of content) {
+    if (part.type === "text") out.push({ text: part.text })
+    else if (part.type === "image" || part.type === "file")
+      out.push({ inline_data: { mime_type: part.mimeType, data: part.base64 } })
+  }
+  return out.length > 0 ? out : [{ text: "" }]
 }
 
 /** Get plain text from message content (for non-vision fallbacks) */
@@ -351,4 +381,244 @@ export async function callAI(
   }
   // OpenAI-compatible
   return data.choices?.[0]?.message?.content || "(No response)"
+}
+
+/* ================================================================== *
+ *  Tool-calling path — callAIWithTools                                 *
+ *                                                                      *
+ *  Provider-agnostic single-turn request that may return a tool-use    *
+ *  response. Callers wrap this in a loop (see ChatInterface tool loop) *
+ *  and feed tool results back as canonical ChatMessage objects with    *
+ *  tool_use / tool_result content parts.                               *
+ * ================================================================== */
+import {
+  messagesForAnthropic,
+  messagesForGoogle,
+  messagesForOpenAI,
+  parseAnthropicResponse,
+  parseGoogleResponse,
+  parseOpenAIResponse,
+  toolsForAnthropic,
+  toolsForGoogle,
+  toolsForOpenAI,
+} from "./tools/converters"
+import {
+  supportsTools,
+  type AIResponse,
+  type Tool,
+} from "./tools/types"
+
+export interface CallAIOptions {
+  modelId: string
+  fallbackApiKey?: string
+  temperature: number
+  maxTokens: number
+  systemPrompt: string
+  signal?: AbortSignal
+  /** When empty, falls back to plain `callAI` string path and wraps as text response. */
+  tools?: Tool[]
+}
+
+export async function callAIWithTools(
+  messages: ChatMessage[],
+  opts: CallAIOptions,
+): Promise<AIResponse> {
+  const { modelId, fallbackApiKey, temperature, maxTokens, systemPrompt, signal } = opts
+  const tools = opts.tools ?? []
+
+  const model = ALL_MODELS.find((m) => m.id === modelId) || {
+    id: modelId,
+    name: modelId,
+    providerId: "openai",
+    description: "",
+    speed: 3,
+    intelligence: 3,
+    contextWindow: "",
+  }
+
+  // No tools or provider doesn't support tools → shortcut through legacy callAI
+  const useTools = tools.length > 0 && supportsTools(model.providerId, modelId)
+  if (!useTools) {
+    const text = await callAI(
+      messages,
+      modelId,
+      fallbackApiKey,
+      temperature,
+      maxTokens,
+      systemPrompt,
+      signal,
+    )
+    return { type: "text", text }
+  }
+
+  let endpoint: string
+  let body: any
+  let parseFn: (data: any) => AIResponse
+
+  switch (model.providerId) {
+    case "openai":
+    case "deepseek":
+    case "xai": {
+      const baseUrl =
+        model.providerId === "deepseek"
+          ? "https://api.deepseek.com"
+          : model.providerId === "xai"
+            ? "https://api.x.ai"
+            : "https://api.openai.com"
+      endpoint = `${baseUrl}/v1/chat/completions`
+      body = {
+        model: modelId,
+        messages: messagesForOpenAI(messages, systemPrompt),
+        temperature,
+        max_tokens: maxTokens,
+        tools: toolsForOpenAI(tools),
+        tool_choice: "auto",
+      }
+      parseFn = parseOpenAIResponse
+      break
+    }
+    case "anthropic": {
+      endpoint = "https://api.anthropic.com/v1/messages"
+      body = {
+        model: modelId,
+        messages: messagesForAnthropic(messages),
+        max_tokens: maxTokens,
+        temperature,
+        tools: toolsForAnthropic(tools),
+        ...(systemPrompt && { system: systemPrompt }),
+      }
+      parseFn = parseAnthropicResponse
+      break
+    }
+    case "google": {
+      endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`
+      body = {
+        contents: messagesForGoogle(messages),
+        generationConfig: {
+          temperature,
+          maxOutputTokens: maxTokens,
+        },
+        tools: toolsForGoogle(tools),
+        ...(systemPrompt && {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+        }),
+      }
+      parseFn = parseGoogleResponse
+      break
+    }
+    case "meta":
+    case "groq": {
+      endpoint = "https://api.groq.com/openai/v1/chat/completions"
+      body = {
+        model: modelId,
+        messages: messagesForOpenAI(messages, systemPrompt),
+        temperature,
+        max_tokens: maxTokens,
+        tools: toolsForOpenAI(tools),
+        tool_choice: "auto",
+      }
+      parseFn = parseOpenAIResponse
+      break
+    }
+    case "openrouter": {
+      endpoint = "https://openrouter.ai/api/v1/chat/completions"
+      body = {
+        model: modelId,
+        messages: messagesForOpenAI(messages, systemPrompt),
+        temperature,
+        max_tokens: maxTokens,
+        tools: toolsForOpenAI(tools),
+        tool_choice: "auto",
+      }
+      parseFn = parseOpenAIResponse
+      break
+    }
+    default:
+      // Unknown / non-tool-capable provider — return text-only via legacy path
+      const text = await callAI(
+        messages,
+        modelId,
+        fallbackApiKey,
+        temperature,
+        maxTokens,
+        systemPrompt,
+        signal,
+      )
+      return { type: "text", text }
+  }
+
+  const authToken = await getAuthToken()
+  const proxyHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  }
+  if (authToken) proxyHeaders["Authorization"] = `Bearer ${authToken}`
+
+  let res: Response
+  try {
+    res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: proxyHeaders,
+      body: JSON.stringify({
+        endpoint,
+        body,
+        provider: model.providerId,
+      }),
+      signal,
+    })
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error(
+        "Network error — please check your internet connection and try again.",
+      )
+    }
+    throw err
+  }
+
+  if ((res.status === 401 || res.status === 404) && fallbackApiKey && fallbackApiKey !== "[server-stored]") {
+    const legacyHeaders = buildLegacyHeaders(model.providerId, fallbackApiKey, endpoint)
+    try {
+      res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint,
+          body,
+          headers: legacyHeaders,
+        }),
+        signal,
+      })
+    } catch (err) {
+      if (err instanceof TypeError) {
+        throw new Error("Network error — please check your internet connection and try again.")
+      }
+      throw err
+    }
+  }
+
+  if (res.status === 401)
+    throw new Error("Authentication required — please log in and save your API key in Settings.")
+  if (res.status === 404)
+    throw new Error("No API key found — please add your API key in Settings.")
+  if (res.status === 429) {
+    const retryAfter = res.headers.get("retry-after")
+    const waitSeconds = retryAfter ? parseInt(retryAfter, 10) : null
+    throw new Error(
+      waitSeconds
+        ? `Rate limited. Please retry after ${waitSeconds} seconds.`
+        : "Rate limited. Please wait a moment and try again.",
+    )
+  }
+  if (!res.ok) {
+    const err = await res.text().catch(() => "")
+    throw new Error(`API error (${res.status}): ${err.slice(0, 200)}`)
+  }
+
+  let data: any
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error("Invalid JSON response from API")
+  }
+
+  return parseFn(data)
 }

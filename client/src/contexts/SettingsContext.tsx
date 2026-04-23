@@ -41,6 +41,22 @@ export interface CustomModel {
   contextWindow: string
 }
 
+/** Routing preferences for the "auto" pseudo-model (Phase 4). */
+export interface RoutingPrefs {
+  /** "heuristic" = tier-1 only (free); "ai-assisted" = tier-1 then tier-2 classifier */
+  mode: "heuristic" | "ai-assisted"
+  /** Model id to use for each task category */
+  defaults: {
+    vision: string
+    reasoning: string
+    cheap: string
+    longContext: string
+    balanced: string
+  }
+  /** Cheap model used for the tier-2 classifier when mode === "ai-assisted" */
+  classifierModel: string
+}
+
 /** Info about a saved key (returned by server — never includes the actual key) */
 export interface SavedKeyInfo {
   provider: string
@@ -104,6 +120,26 @@ export interface Settings {
     role: string
     customInstructions: string
   }
+
+  // ── Capability expansion (Phase 0 forward-declared) ──
+
+  /** Hard cap on tool-use rounds per user message (Phase 0). */
+  maxToolRounds: number
+
+  /** Master switch for all tool use (Phase 1). Off = model never sees tools. */
+  toolUseEnabled: boolean
+
+  /** Per-tool enable flags (Phase 1). Key = tool name. */
+  enabledTools: Record<string, boolean>
+
+  /** MCP global enable (Phase 2). Individual servers stored in Supabase. */
+  mcpEnabled: boolean
+
+  /** File upload (Phase 3). */
+  fileUploadMaxMB: number
+
+  /** Auto-routing configuration (Phase 4). */
+  routingPrefs: RoutingPrefs
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -138,6 +174,27 @@ const DEFAULT_SETTINGS: Settings = {
     bio: "",
     role: "",
     customInstructions: "",
+  },
+  maxToolRounds: 8,
+  toolUseEnabled: true,
+  enabledTools: {
+    web_search: true,
+    fetch_url: true,
+    memory_add: true,
+    memory_query: true,
+  },
+  mcpEnabled: false,
+  fileUploadMaxMB: 10,
+  routingPrefs: {
+    mode: "heuristic",
+    defaults: {
+      vision: "gpt-4o",
+      reasoning: "o1",
+      cheap: "gpt-4o-mini",
+      longContext: "gemini-2.5-pro",
+      balanced: "claude-sonnet-4-6",
+    },
+    classifierModel: "gpt-4o-mini",
   },
 }
 
@@ -214,6 +271,37 @@ function validateSettings(raw: any): Partial<Settings> {
   if (Array.isArray(raw.customModels)) out.customModels = raw.customModels
   if (VALID_TIERS.includes(raw.membershipTier))
     out.membershipTier = raw.membershipTier
+
+  // Capability expansion validation
+  if (typeof raw.maxToolRounds === "number" && raw.maxToolRounds >= 1 && raw.maxToolRounds <= 32)
+    out.maxToolRounds = Math.floor(raw.maxToolRounds)
+  if (typeof raw.toolUseEnabled === "boolean") out.toolUseEnabled = raw.toolUseEnabled
+  if (raw.enabledTools && typeof raw.enabledTools === "object" && !Array.isArray(raw.enabledTools)) {
+    const et: Record<string, boolean> = {}
+    for (const [k, v] of Object.entries(raw.enabledTools as Record<string, unknown>)) {
+      if (typeof v === "boolean" && typeof k === "string" && k.length < 128) et[k] = v
+    }
+    out.enabledTools = et
+  }
+  if (typeof raw.mcpEnabled === "boolean") out.mcpEnabled = raw.mcpEnabled
+  if (typeof raw.fileUploadMaxMB === "number" && raw.fileUploadMaxMB > 0 && raw.fileUploadMaxMB <= 100)
+    out.fileUploadMaxMB = raw.fileUploadMaxMB
+  if (raw.routingPrefs && typeof raw.routingPrefs === "object") {
+    const rp = raw.routingPrefs as any
+    const mode = rp.mode === "ai-assisted" ? "ai-assisted" : "heuristic"
+    const d = rp.defaults && typeof rp.defaults === "object" ? rp.defaults : {}
+    out.routingPrefs = {
+      mode,
+      defaults: {
+        vision: typeof d.vision === "string" ? d.vision.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.defaults.vision,
+        reasoning: typeof d.reasoning === "string" ? d.reasoning.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.defaults.reasoning,
+        cheap: typeof d.cheap === "string" ? d.cheap.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.defaults.cheap,
+        longContext: typeof d.longContext === "string" ? d.longContext.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.defaults.longContext,
+        balanced: typeof d.balanced === "string" ? d.balanced.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.defaults.balanced,
+      },
+      classifierModel: typeof rp.classifierModel === "string" ? rp.classifierModel.slice(0, 128) : DEFAULT_SETTINGS.routingPrefs.classifierModel,
+    }
+  }
 
   if (raw.userProfile && typeof raw.userProfile === "object") {
     out.userProfile = {
