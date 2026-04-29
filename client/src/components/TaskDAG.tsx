@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner"
 import { ALL_MODELS } from "./ModelSwitcher"
 import { callAI as sharedCallAI } from "@/lib/aiClient"
+import { resolveLegacyModel } from "@/lib/resolveModel"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -1298,19 +1299,17 @@ export default function TaskDAG() {
   const runAll = useCallback(async () => {
     if (runningRef.current) return
 
-    // Check API key
-    const currentModel =
-      ALL_MODELS.find(
-        (m) => m.id === settings.selectedModelId,
-      ) || ALL_MODELS[0]
-    if (!hasApiKey(currentModel.providerId)) {
+    // Resolve to a real model with an API key configured (handles auto/priority)
+    const resolved = resolveLegacyModel(settings.selectedModelId, settings, hasApiKey)
+    if (!resolved) {
       toast.error(
         en
-          ? `No API key for ${currentModel.providerId}. Please set it in Settings.`
-          : `\u5c1a\u672a\u8a2d\u5b9a ${currentModel.providerId} \u7684 API Key\u3002\u8acb\u5728\u8a2d\u5b9a\u4e2d\u914d\u7f6e\u3002`,
+          ? "No model with an API key is available. Please add one in Settings."
+          : "\u6c92\u6709\u4efb\u4f55\u5df2\u8a2d\u5b9a API Key \u7684\u6a21\u578b\u53ef\u7528\uff0c\u8acb\u81f3\u8a2d\u5b9a\u4e2d\u65b0\u589e\u3002",
       )
       return
     }
+    const dispatchModelId = resolved.modelId
 
     runningRef.current = true
     stopRef.current = false
@@ -1463,7 +1462,7 @@ export default function TaskDAG() {
       const fullPrompt = buildNodePrompt(node, allNodesSnapshot, allEdgesSnapshot, predecessorOutputs, mergedEdgePrompt, visitCounts)
 
       try {
-        const rawResponse = await callNodeAI(fullPrompt, settings.selectedModelId, undefined, settings.temperature, settings.maxTokens)
+        const rawResponse = await callNodeAI(fullPrompt, dispatchModelId, undefined, settings.temperature, settings.maxTokens)
         if (stopRef.current) return
 
         const parsed = parseAIResponse(rawResponse)
@@ -1476,7 +1475,7 @@ export default function TaskDAG() {
 
         // Check stagnation after 3+ iterations
         if (visits >= 3) {
-          checkStagnation(history, settings.selectedModelId, undefined).then(
+          checkStagnation(history, dispatchModelId, undefined).then(
             (isStagnant) => {
               if (isStagnant) {
                 setStagnationWarning({
@@ -1658,18 +1657,16 @@ export default function TaskDAG() {
       const node = nodes.find((n) => n.id === nodeId)
       if (!node) return
 
-      const currentModel =
-        ALL_MODELS.find(
-          (m) => m.id === settings.selectedModelId,
-        ) || ALL_MODELS[0]
-      if (!hasApiKey(currentModel.providerId)) {
+      const resolved = resolveLegacyModel(settings.selectedModelId, settings, hasApiKey)
+      if (!resolved) {
         toast.error(
           en
-            ? `No API key for ${currentModel.providerId}. Please set it in Settings.`
-            : `\u5c1a\u672a\u8a2d\u5b9a ${currentModel.providerId} \u7684 API Key\u3002`,
+            ? "No model with an API key is available. Please add one in Settings."
+            : "\u6c92\u6709\u4efb\u4f55\u5df2\u8a2d\u5b9a API Key \u7684\u6a21\u578b\u53ef\u7528\uff0c\u8acb\u81f3\u8a2d\u5b9a\u4e2d\u65b0\u589e\u3002",
         )
         return
       }
+      const dispatchModelId = resolved.modelId
       setNodes((prev) =>
         prev.map((n) =>
           n.id === nodeId
@@ -1710,7 +1707,7 @@ export default function TaskDAG() {
       try {
         const rawResponse = await callNodeAI(
           fullPrompt,
-          settings.selectedModelId,
+          dispatchModelId,
           undefined,
           settings.temperature,
           settings.maxTokens,

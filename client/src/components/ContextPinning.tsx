@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { callAI } from "@/lib/aiClient";
+import { resolveLegacyModel } from "@/lib/resolveModel";
 import { loadUserData, saveUserData } from "@/lib/storage";
 import {
   Pin,
@@ -540,18 +541,12 @@ export default function ContextPinning() {
         return;
       }
 
-      const allModels = getAllModels(settings.customModels);
-      const model = allModels.find((m) => m.id === settings.selectedModelId);
-      if (!model) {
-        toast.error(lang === "en" ? "No model selected" : "未選擇模型");
-        return;
-      }
-
-      if (!hasApiKey(model.providerId)) {
+      const resolved = resolveLegacyModel(settings.selectedModelId, settings, hasApiKey);
+      if (!resolved) {
         toast.error(
           lang === "en"
-            ? "Please set an API key in Settings first"
-            : "請先在設定中設定 API Key"
+            ? "No model with an API key is available."
+            : "沒有任何已設定 API Key 的模型可用。"
         );
         return;
       }
@@ -567,7 +562,7 @@ export default function ContextPinning() {
       try {
         const condensedText = await callAI(
           [{ role: "user", content: condensationPrompt }],
-          model.id,
+          resolved.modelId,
           undefined,
           0.3,
           1024,

@@ -9,7 +9,7 @@ import {
   RotateCcw, Download, Upload, Volume2, VolumeX, Trash2,
   Globe, Type, Sparkles, Plus, ChevronDown, UserCircle,
   Crown, Zap, Star, Copy, ExternalLink, Wrench, Server, GitBranch, FileText,
-  Layers, ArrowUp, ArrowDown, Clock, AlertTriangle,
+  Layers, Clock, AlertTriangle, GripVertical, KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, ThemeMode, Language, SendKey, FontSize, MessageDensity, MembershipTier } from "@/contexts/SettingsContext";
@@ -1439,7 +1439,7 @@ function RoutingTab() {
  * ============================================================== */
 
 function PriorityTab() {
-  const { settings, updateSetting } = useSettings();
+  const { settings, updateSetting, hasApiKey } = useSettings();
   const lang = settings.language;
   const list = settings.priorityModels ?? [];
 
@@ -1448,6 +1448,8 @@ function PriorityTab() {
   >([]);
   const [adding, setAdding] = useState(false);
   const [addValue, setAddValue] = useState("");
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Subscribe to quota registry so the status badges update live
   useEffect(() => {
@@ -1465,16 +1467,17 @@ function PriorityTab() {
     };
   }, []);
 
-  const move = (index: number, dir: -1 | 1) => {
-    const next = [...list];
-    const target = index + dir;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target]!, next[index]!];
+  const remove = (index: number) => {
+    const next = list.filter((_, i) => i !== index);
     updateSetting("priorityModels", next);
   };
 
-  const remove = (index: number) => {
-    const next = list.filter((_, i) => i !== index);
+  const reorder = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
+    const next = [...list];
+    const [picked] = next.splice(from, 1);
+    if (picked === undefined) return;
+    next.splice(to, 0, picked);
     updateSetting("priorityModels", next);
   };
 
@@ -1497,8 +1500,33 @@ function PriorityTab() {
     import("@/lib/quotaRegistry").then(mod => mod.clearAll());
   };
 
+  // Custom-model owners are tracked separately from the built-in provider list.
+  const isCustomModel = (modelId: string) =>
+    settings.customModels.some(cm => cm.id === modelId);
+  const providerOf = (modelId: string): string | undefined => {
+    const builtin = ALL_MODELS.find(m => m.id === modelId);
+    if (builtin) return builtin.providerId;
+    const custom = settings.customModels.find(cm => cm.id === modelId);
+    return custom?.providerId;
+  };
+  const hasKey = (modelId: string): boolean => {
+    if (isCustomModel(modelId)) return true; // custom endpoints use their own auth
+    const p = providerOf(modelId);
+    return p ? hasApiKey(p) : false;
+  };
+
   const blockedMap = new Map(entries.map(e => [e.modelId, e]));
-  const usableModels = ALL_MODELS.filter(m => !list.includes(m.id));
+  // Models eligible to add: not already in list AND has an API key configured.
+  // Custom models are always eligible.
+  const customAsModelLike: Array<{ id: string; name: string; providerId: string }> =
+    settings.customModels.map(cm => ({ id: cm.id, name: cm.name, providerId: cm.providerId }));
+  const allCandidates = [
+    ...ALL_MODELS.map(m => ({ id: m.id, name: m.name, providerId: m.providerId })),
+    ...customAsModelLike,
+  ];
+  const addableModels = allCandidates.filter(
+    m => !list.includes(m.id) && (settings.customModels.some(cm => cm.id === m.id) || hasApiKey(m.providerId)),
+  );
 
   const reasonLabel = (reason: string) => {
     if (lang === "en") {
@@ -1561,29 +1589,82 @@ function PriorityTab() {
         <div className="space-y-1.5">
           {list.map((modelId, i) => {
             const meta = ALL_MODELS.find(m => m.id === modelId);
+            const customMeta = settings.customModels.find(cm => cm.id === modelId);
+            const displayName = meta?.name ?? customMeta?.name ?? modelId;
+            const ctxWindow = meta?.contextWindow ?? customMeta?.contextWindow;
             const blocked = blockedMap.get(modelId);
             const remaining = blocked ? blocked.blockedUntil - Date.now() : 0;
+            const keyOk = hasKey(modelId);
+            const isDragging = draggedIndex === i;
+            const isDragTarget = dragOverIndex === i && draggedIndex !== null && draggedIndex !== i;
+
             return (
               <div
                 key={modelId}
+                draggable
+                onDragStart={(e) => {
+                  setDraggedIndex(i);
+                  e.dataTransfer.effectAllowed = "move";
+                  // setData is required by Firefox to actually start a drag
+                  e.dataTransfer.setData("text/plain", String(i));
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverIndex !== i) setDragOverIndex(i);
+                }}
+                onDragLeave={() => {
+                  if (dragOverIndex === i) setDragOverIndex(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const from = draggedIndex;
+                  if (from !== null && from !== i) reorder(from, i);
+                  setDraggedIndex(null);
+                  setDragOverIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedIndex(null);
+                  setDragOverIndex(null);
+                }}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-lg border",
-                  blocked
-                    ? "bg-amber-500/5 border-amber-500/20"
-                    : "bg-white/5 border-white/10",
+                  "flex items-center gap-2 px-3 py-2 rounded-lg border transition-all",
+                  isDragging && "opacity-40",
+                  isDragTarget && "border-cyan-400/60 bg-cyan-500/10",
+                  !isDragTarget && (
+                    blocked
+                      ? "bg-amber-500/5 border-amber-500/20"
+                      : !keyOk
+                        ? "bg-red-500/5 border-red-500/20"
+                        : "bg-white/5 border-white/10"
+                  ),
                 )}
               >
+                <button
+                  className="p-0.5 rounded text-white/30 hover:text-white/70 cursor-grab active:cursor-grabbing"
+                  title={lang === "en" ? "Drag to reorder" : "拖曳排序"}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <GripVertical size={14} />
+                </button>
                 <span className="text-[10px] font-mono text-white/30 w-5">{i + 1}.</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-white/90 truncate">
-                      {meta?.name ?? modelId}
+                      {displayName}
                     </span>
-                    {meta && (
-                      <span className="text-[10px] text-white/30 font-mono">{meta.contextWindow}</span>
+                    {ctxWindow && (
+                      <span className="text-[10px] text-white/30 font-mono">{ctxWindow}</span>
                     )}
                   </div>
-                  {blocked && remaining > 0 && (
+                  {!keyOk ? (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <KeyRound size={10} className="text-red-400" />
+                      <span className="text-[10px] text-red-400">
+                        {lang === "en" ? "No API key — will be skipped" : "未設定 API Key — 會被略過"}
+                      </span>
+                    </div>
+                  ) : blocked && remaining > 0 ? (
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <AlertTriangle size={10} className="text-amber-400" />
                       <span className="text-[10px] text-amber-400">
@@ -1596,8 +1677,7 @@ function PriorityTab() {
                         {lang === "en" ? "clear" : "清除"}
                       </button>
                     </div>
-                  )}
-                  {!blocked && (
+                  ) : (
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       <span className="text-[10px] text-white/40">
@@ -1606,22 +1686,6 @@ function PriorityTab() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0}
-                  className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/5 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
-                  title={lang === "en" ? "Move up" : "上移"}
-                >
-                  <ArrowUp size={12} />
-                </button>
-                <button
-                  onClick={() => move(i, 1)}
-                  disabled={i === list.length - 1}
-                  className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/5 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
-                  title={lang === "en" ? "Move down" : "下移"}
-                >
-                  <ArrowDown size={12} />
-                </button>
                 <button
                   onClick={() => remove(i)}
                   className="p-1 rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
@@ -1637,10 +1701,16 @@ function PriorityTab() {
         {!adding && (
           <button
             onClick={() => setAdding(true)}
-            className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-white/15 hover:border-white/30 hover:bg-white/5 text-xs text-white/50 hover:text-white/80 transition-colors"
+            disabled={addableModels.length === 0}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-white/15 hover:border-white/30 hover:bg-white/5 text-xs text-white/50 hover:text-white/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-white/15"
+            title={addableModels.length === 0
+              ? (lang === "en" ? "No more models with API keys to add" : "沒有更多已設定 API Key 的模型可加入")
+              : undefined}
           >
             <Plus size={12} />
-            {lang === "en" ? "Add model" : "加入模型"}
+            {addableModels.length === 0
+              ? (lang === "en" ? "No more models available" : "沒有更多可加入的模型")
+              : (lang === "en" ? "Add model" : "加入模型")}
           </button>
         )}
 
@@ -1652,7 +1722,7 @@ function PriorityTab() {
               className="flex-1 px-2 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90"
             >
               <option value="">{lang === "en" ? "Select a model…" : "選擇模型…"}</option>
-              {usableModels.map(m => (
+              {addableModels.map(m => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
@@ -1674,6 +1744,14 @@ function PriorityTab() {
       </div>
 
       <div className="text-xs text-white/45 leading-relaxed pt-3 border-t border-white/6 space-y-1.5">
+        <div className="flex items-start gap-2">
+          <KeyRound size={12} className="mt-0.5 shrink-0 text-white/40" />
+          <span>
+            {lang === "en"
+              ? "Models without API keys are still listed (to preserve order) but skipped at send time."
+              : "未設定 API Key 的模型仍會保留在清單裡（不破壞順序），但發送時會自動略過。"}
+          </span>
+        </div>
         <div className="flex items-start gap-2">
           <Clock size={12} className="mt-0.5 shrink-0 text-white/40" />
           <span>

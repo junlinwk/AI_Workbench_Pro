@@ -1278,9 +1278,18 @@ export default function ChatInterface({
   const currentProvider = currentModel
     ? MODEL_PROVIDERS.find((p) => p.id === currentModel.providerId)
     : null
-  const canSend = hasApiKey(currentModel?.providerId || "")
-  // Fallback key for legacy proxy mode (when server-side storage unavailable)
-  const fallbackKey = currentModel ? getApiKey(currentModel.providerId) : undefined
+  // Pseudo-models ("auto" / "priority") delegate to real models at send time —
+  // they're "sendable" if at least one configured provider has an API key.
+  const isPseudoModel = currentModel?.id === "auto" || currentModel?.id === "priority"
+  const anyProviderConfigured = MODEL_PROVIDERS.some((p) => hasApiKey(p.id)) ||
+    settings.customModels.some((cm) => hasApiKey(cm.providerId)) ||
+    settings.customModels.length > 0
+  const canSend = isPseudoModel
+    ? anyProviderConfigured
+    : hasApiKey(currentModel?.providerId || "")
+  // Fallback key for legacy proxy mode (when server-side storage unavailable).
+  // Pseudo-models have no concrete provider yet — leave undefined.
+  const fallbackKey = currentModel && !isPseudoModel ? getApiKey(currentModel.providerId) : undefined
   // Whether Groq/Meta key is available for voice features (STT/TTS)
   const hasGroqKey = hasApiKey("groq") || hasApiKey("meta")
 
@@ -1509,8 +1518,12 @@ export default function ChatInterface({
     if (!canSend) {
       toast.error(
         lang === "en"
-          ? `Please set your ${currentProvider?.name || "model"} API key in Settings > Models & API.`
-          : `請先在設定 → 模型與 API 中設定 ${currentProvider?.name || "模型"} 的 API Key。`,
+          ? isPseudoModel
+            ? "No API keys configured. Add at least one in Settings > Models & API."
+            : `Please set your ${currentProvider?.name || "model"} API key in Settings > Models & API.`
+          : isPseudoModel
+            ? "尚未設定任何 API Key。請至「設定 → 模型與 API」新增至少一個。"
+            : `請先在設定 → 模型與 API 中設定 ${currentProvider?.name || "模型"} 的 API Key。`,
       )
       return
     }
@@ -1765,8 +1778,8 @@ export default function ChatInterface({
       let routingReason: string | undefined
       let priorityList: string[] | undefined
       if (settings.selectedModelId === "priority") {
-        priorityList = (settings.priorityModels ?? []).filter((id) => !!id)
-        if (priorityList.length === 0) {
+        const rawList = (settings.priorityModels ?? []).filter((id) => !!id)
+        if (rawList.length === 0) {
           toast.error(
             lang === "en"
               ? "Priority list is empty — configure it in Settings → Priority"
@@ -1775,12 +1788,35 @@ export default function ChatInterface({
           setIsTyping(false)
           return
         }
+        // Filter out models whose provider has no API key configured. Custom
+        // models pass through (they bring their own auth via custom endpoint).
+        const isCustom = (id: string) => settings.customModels.some((cm) => cm.id === id)
+        const providerOf = (id: string): string | undefined => {
+          const builtin = ALL_MODELS.find((m) => m.id === id)
+          if (builtin) return builtin.providerId
+          return settings.customModels.find((cm) => cm.id === id)?.providerId
+        };
+        priorityList = rawList.filter((id) => {
+          if (isCustom(id)) return true
+          const p = providerOf(id)
+          return p ? hasApiKey(p) : false
+        })
+        if (priorityList.length === 0) {
+          toast.error(
+            lang === "en"
+              ? "No models in your priority list have API keys configured. Add a key in Settings → Models."
+              : "優先級清單中沒有任何模型已設定 API Key。請到「設定 → Models & API Keys」新增。",
+          )
+          setIsTyping(false)
+          return
+        }
         const firstUsable = priorityList.find((id) => !isBlocked(id)) ?? priorityList[0]!
         effectiveModelId = firstUsable
+        const skippedNoKey = rawList.length - priorityList.length
         routingReason =
           lang === "en"
-            ? `priority · top model: ${firstUsable}`
-            : `優先級 · 起始：${firstUsable}`
+            ? `priority · top: ${firstUsable}${skippedNoKey > 0 ? ` (${skippedNoKey} skipped, no key)` : ""}`
+            : `優先級 · 起始：${firstUsable}${skippedNoKey > 0 ? `（略過 ${skippedNoKey} 個未設 key）` : ""}`
       }
       if (settings.selectedModelId === "auto") {
         try {
@@ -2275,14 +2311,30 @@ export default function ChatInterface({
       const regenTemperature = regenBranchData?.temperature ?? settings.temperature
 
       // Resolve pseudo-models (auto / priority) to a concrete model id for regen.
-      // Auto isn't recomputed here — fall through to balanced; priority picks the first non-blocked.
+      // For both pseudo-modes, filter out models whose provider has no API key.
       let regenModelId = settings.selectedModelId
+      const providerOfModel = (id: string): string | undefined => {
+        const builtin = ALL_MODELS.find((m) => m.id === id)
+        if (builtin) return builtin.providerId
+        return settings.customModels.find((cm) => cm.id === id)?.providerId
+      }
+      const hasKeyForModel = (id: string): boolean => {
+        if (settings.customModels.some((cm) => cm.id === id)) return true
+        const p = providerOfModel(id)
+        return p ? hasApiKey(p) : false
+      }
       if (regenModelId === "priority") {
-        const list = settings.priorityModels ?? []
+        const list = (settings.priorityModels ?? []).filter(hasKeyForModel)
         regenModelId =
-          list.find((id) => !isBlocked(id)) ?? list[0] ?? settings.routingPrefs.defaults.balanced
+          list.find((id) => !isBlocked(id)) ??
+          list[0] ??
+          (hasKeyForModel(settings.routingPrefs.defaults.balanced)
+            ? settings.routingPrefs.defaults.balanced
+            : ALL_MODELS.find((m) => hasKeyForModel(m.id))?.id ?? settings.routingPrefs.defaults.balanced)
       } else if (regenModelId === "auto") {
-        regenModelId = settings.routingPrefs.defaults.balanced
+        regenModelId = hasKeyForModel(settings.routingPrefs.defaults.balanced)
+          ? settings.routingPrefs.defaults.balanced
+          : ALL_MODELS.find((m) => hasKeyForModel(m.id))?.id ?? settings.routingPrefs.defaults.balanced
       }
 
       const response = await callAI(
@@ -2453,8 +2505,12 @@ export default function ChatInterface({
           />
           <p className="text-xs text-amber-300/80">
             {lang === "en"
-              ? `No ${currentProvider?.name} API key set — go to Settings > Models & API to configure.`
-              : `尚未設定 ${currentProvider?.name} API Key — 開啟設定 → 模型與 API 來設定。`}
+              ? isPseudoModel
+                ? "No API keys configured — go to Settings > Models & API to add at least one."
+                : `No ${currentProvider?.name} API key set — go to Settings > Models & API to configure.`
+              : isPseudoModel
+                ? "尚未設定任何 API Key — 開啟設定 → 模型與 API 來新增至少一個。"
+                : `尚未設定 ${currentProvider?.name} API Key — 開啟設定 → 模型與 API 來設定。`}
           </p>
         </div>
       )}

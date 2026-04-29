@@ -27,6 +27,7 @@ import { loadUserData, saveUserData, sanitizeText } from "@/lib/storage"
 import { t } from "@/i18n"
 import { ALL_MODELS, MODEL_PROVIDERS, getAllModels } from "./ModelSwitcher"
 import { callAI } from "@/lib/aiClient"
+import { resolveLegacyModel } from "@/lib/resolveModel"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -265,7 +266,10 @@ export default function WidgetsShowcase() {
   const currentProvider = currentModel
     ? MODEL_PROVIDERS.find((p) => p.id === currentModel.providerId)
     : null
-  const canSend = hasApiKey(currentModel?.providerId || "")
+  const isPseudoModel = currentModel?.id === "auto" || currentModel?.id === "priority"
+  const canSend = isPseudoModel
+    ? MODEL_PROVIDERS.some((p) => hasApiKey(p.id)) || settings.customModels.length > 0
+    : hasApiKey(currentModel?.providerId || "")
 
   const handleChipClick = useCallback((text: string) => {
     setInput(text)
@@ -319,9 +323,19 @@ export default function WidgetsShowcase() {
         ? `${WIDGET_SYSTEM_PROMPT}\n\nAdditional instructions:\n${settings.systemPrompt}`
         : WIDGET_SYSTEM_PROMPT
 
+      const resolved = resolveLegacyModel(settings.selectedModelId, settings, hasApiKey)
+      if (!resolved) {
+        setIsTyping(false)
+        toast.error(
+          settings.language === "en"
+            ? "No model with an API key is available."
+            : "沒有任何已設定 API Key 的模型可用。",
+        )
+        return
+      }
       const response = await callAI(
         chatHistory,
-        settings.selectedModelId,
+        resolved.modelId,
         undefined,
         settings.temperature,
         settings.maxTokens,
@@ -405,9 +419,19 @@ export default function WidgetsShowcase() {
         ? `${WIDGET_SYSTEM_PROMPT}\n\nAdditional instructions:\n${settings.systemPrompt}`
         : WIDGET_SYSTEM_PROMPT
 
+      const resolved = resolveLegacyModel(settings.selectedModelId, settings, hasApiKey)
+      if (!resolved) {
+        setIsTyping(false)
+        toast.error(
+          settings.language === "en"
+            ? "No model with an API key is available."
+            : "沒有任何已設定 API Key 的模型可用。",
+        )
+        return
+      }
       const response = await callAI(
         chatHistory,
-        settings.selectedModelId,
+        resolved.modelId,
         undefined,
         settings.temperature,
         settings.maxTokens,

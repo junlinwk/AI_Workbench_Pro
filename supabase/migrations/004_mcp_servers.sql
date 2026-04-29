@@ -45,3 +45,4 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_mcp_servers_updated_at
   BEFORE UPDATE ON user_mcp_servers
   FOR EACH ROW EXECUTE FUNCTION update_mcp_servers_updated_at();
+

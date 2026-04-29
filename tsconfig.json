@@ -21,7 +21,8 @@
     "types": ["node", "vite/client"],
     "paths": {
       "@/*": ["./client/src/*"],
-      "@shared/*": ["./shared/*"]
+      "@shared/*": ["./shared/*"],
+      "@liquid-glass": ["./liquid-glass-react-master/src/index.tsx"]
     }
   }
 }
