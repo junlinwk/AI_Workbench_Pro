@@ -191,6 +191,61 @@ https://github.com/user-attachments/assets/e9e849f5-4864-4bb8-9942-87ba311d45bf
 </td>
 </tr>
 
+
+<tr>
+<td width="50%" align="center">
+
+**MCP Tool Use**<br/>**MCP 工具使用**
+
+
+
+https://github.com/user-attachments/assets/5354ee0d-85d6-49e0-9177-e901ab4ee539
+
+
+
+</td>
+<td width="50%" align="center">
+
+**Multimodal**<br/> **多模態**
+
+
+
+https://github.com/user-attachments/assets/2a9861b5-dde5-4071-94e3-432319dd2608
+
+
+
+
+</td>
+</tr>
+
+
+<tr>
+<td width="50%" align="center">
+
+**Auto Routing**<br/>**自訂模型切換**
+
+
+
+
+https://github.com/user-attachments/assets/9ec26b49-6b68-42f4-8aee-837fddc2a181
+
+
+
+</td>
+<td width="50%" align="center">
+
+**Quota Routing**<br/> **額度自動切換**
+
+
+
+https://github.com/user-attachments/assets/4e5cd327-5902-46ce-9cd4-7167c5d2460e
+
+
+
+</td>
+</tr>
+
+
 </table>
 
 
