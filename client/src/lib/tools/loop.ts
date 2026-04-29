@@ -191,17 +191,21 @@ export async function runToolLoop(
     const assistantParts: ContentPart[] = []
     if (resp.partialText) assistantParts.push({ type: "text", text: resp.partialText })
     for (const call of resp.toolCalls) {
+      // Carry thoughtSignature through so messagesForGoogle can echo it back
+      // (Gemini 2.5 / 3 thinking models reject the next turn without it).
       assistantParts.push({
         type: "tool_use",
         id: call.id,
         name: call.name,
         input: call.input,
+        ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}),
       })
       toolUseParts.push({
         type: "tool_use",
         id: call.id,
         name: call.name,
         input: call.input,
+        ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}),
       })
     }
     messages.push({ role: "assistant", content: assistantParts })

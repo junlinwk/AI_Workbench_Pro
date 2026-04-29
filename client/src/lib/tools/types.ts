@@ -64,6 +64,13 @@ export interface ToolCall {
   name: string
   /** Parsed JSON object; never a string */
   input: unknown
+  /**
+   * Gemini 2.5 / 3 thinking models include a `thoughtSignature` next to the
+   * functionCall. Google REQUIRES we echo it back in the next turn or replies
+   * fail with HTTP 400 ("Function call is missing a thought_signature…").
+   * Other providers ignore this field.
+   */
+  thoughtSignature?: string
 }
 
 /** Tool result formatted for round-trip back to the model */

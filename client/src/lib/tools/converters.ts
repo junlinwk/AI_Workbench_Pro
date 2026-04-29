@@ -331,6 +331,11 @@ export function messagesForGoogle(messages: ChatMessage[]): GoogleContent[] {
               name: p.name,
               args: (p.input as Record<string, unknown>) ?? {},
             },
+            // Echo back Gemini thinking signature when we have one — required
+            // by 2.5 / 3.x models, ignored by older Gemini versions.
+            ...(p.thoughtSignature
+              ? { thoughtSignature: p.thoughtSignature }
+              : {}),
           }
         if (p.type === "tool_result")
           return {
@@ -442,6 +447,9 @@ export function parseGoogleResponse(data: any): AIResponse {
         id: `${p.functionCall.name}::${cryptoRandomId()}`,
         name: String(p.functionCall.name),
         input: p.functionCall.args ?? {},
+        // Thinking models (Gemini 2.5 / 3) attach this; we MUST echo it back.
+        thoughtSignature:
+          typeof p.thoughtSignature === "string" ? p.thoughtSignature : undefined,
       })
     }
   }

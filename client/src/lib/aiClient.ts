@@ -162,7 +162,14 @@ export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image"; base64: string; mimeType: string }
   | { type: "file"; base64: string; mimeType: string; name: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | {
+      type: "tool_use"
+      id: string
+      name: string
+      input: unknown
+      /** Gemini-only: required by Google's API on the next turn. */
+      thoughtSignature?: string
+    }
   | {
       type: "tool_result"
       toolCallId: string
