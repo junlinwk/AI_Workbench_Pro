@@ -9,6 +9,7 @@ import {
   RotateCcw, Download, Upload, Volume2, VolumeX, Trash2,
   Globe, Type, Sparkles, Plus, ChevronDown, UserCircle,
   Crown, Zap, Star, Copy, ExternalLink, Wrench, Server, GitBranch, FileText,
+  Layers, ArrowUp, ArrowDown, Clock, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, ThemeMode, Language, SendKey, FontSize, MessageDensity, MembershipTier } from "@/contexts/SettingsContext";
@@ -41,6 +42,7 @@ type SettingsTab =
   | "tools"
   | "mcp"
   | "routing"
+  | "priority"
   | "files"
   | "privacy"
   | "about";
@@ -1433,6 +1435,267 @@ function RoutingTab() {
 }
 
 /* ============================================================== *
+ *  Priority tab — quota-fallback chain                             *
+ * ============================================================== */
+
+function PriorityTab() {
+  const { settings, updateSetting } = useSettings();
+  const lang = settings.language;
+  const list = settings.priorityModels ?? [];
+
+  const [entries, setEntries] = useState<
+    Array<{ modelId: string; blockedUntil: number; reason: string; message?: string }>
+  >([]);
+  const [adding, setAdding] = useState(false);
+  const [addValue, setAddValue] = useState("");
+
+  // Subscribe to quota registry so the status badges update live
+  useEffect(() => {
+    let cancelled = false;
+    let unsub: (() => void) | undefined;
+    import("@/lib/quotaRegistry").then(mod => {
+      if (cancelled) return;
+      const refresh = () => setEntries(mod.getAllEntries());
+      refresh();
+      unsub = mod.subscribe(refresh);
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
+
+  const move = (index: number, dir: -1 | 1) => {
+    const next = [...list];
+    const target = index + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    updateSetting("priorityModels", next);
+  };
+
+  const remove = (index: number) => {
+    const next = list.filter((_, i) => i !== index);
+    updateSetting("priorityModels", next);
+  };
+
+  const add = (modelId: string) => {
+    if (!modelId) return;
+    if (list.includes(modelId)) {
+      toast.error(lang === "en" ? "Already in priority list" : "已經在清單中");
+      return;
+    }
+    updateSetting("priorityModels", [...list, modelId]);
+    setAdding(false);
+    setAddValue("");
+  };
+
+  const clearOne = (modelId: string) => {
+    import("@/lib/quotaRegistry").then(mod => mod.clearBlocked(modelId));
+  };
+
+  const clearAllBlocks = () => {
+    import("@/lib/quotaRegistry").then(mod => mod.clearAll());
+  };
+
+  const blockedMap = new Map(entries.map(e => [e.modelId, e]));
+  const usableModels = ALL_MODELS.filter(m => !list.includes(m.id));
+
+  const reasonLabel = (reason: string) => {
+    if (lang === "en") {
+      switch (reason) {
+        case "rate_limit": return "Rate limit";
+        case "quota_exceeded": return "Quota exhausted";
+        case "overloaded": return "Overloaded";
+        case "auth_failed": return "Auth failed";
+        default: return "Blocked";
+      }
+    }
+    switch (reason) {
+      case "rate_limit": return "速率限制";
+      case "quota_exceeded": return "配額用盡";
+      case "overloaded": return "供應商過載";
+      case "auth_failed": return "驗證失敗";
+      default: return "已封鎖";
+    }
+  };
+
+  const fmtRemaining = (ms: number) => {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 60) return `${sec}s`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m`;
+    const hr = (min / 60).toFixed(1);
+    return `${hr}h`;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xs text-white/60 leading-relaxed">
+        {lang === "en"
+          ? "When you select \"Priority\" in the model switcher, each call tries these models top-to-bottom, falling through on quota / rate-limit errors. Each new message restarts at the top, so the chain climbs back as caps recover."
+          : "在模型選單選擇「優先級」時，每次呼叫會依此清單由上往下嘗試，遇到配額或速率限制就跳下一個。每則新訊息都從頂端重新開始，所以額度恢復後會自動回到較高優先的模型。"}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-white/50 uppercase tracking-wider">
+            {lang === "en" ? "Fallback chain" : "Fallback 順序"}
+          </span>
+          {entries.length > 0 && (
+            <button
+              onClick={clearAllBlocks}
+              className="text-[10px] text-white/40 hover:text-white/70 transition-colors flex items-center gap-1"
+            >
+              <RotateCcw size={10} />
+              {lang === "en" ? "Clear all blocks" : "清除所有封鎖"}
+            </button>
+          )}
+        </div>
+
+        {list.length === 0 && (
+          <div className="text-xs text-white/30 italic py-4 text-center border border-dashed border-white/10 rounded-lg">
+            {lang === "en" ? "No models in priority list yet." : "尚未加入任何模型。"}
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          {list.map((modelId, i) => {
+            const meta = ALL_MODELS.find(m => m.id === modelId);
+            const blocked = blockedMap.get(modelId);
+            const remaining = blocked ? blocked.blockedUntil - Date.now() : 0;
+            return (
+              <div
+                key={modelId}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-lg border",
+                  blocked
+                    ? "bg-amber-500/5 border-amber-500/20"
+                    : "bg-white/5 border-white/10",
+                )}
+              >
+                <span className="text-[10px] font-mono text-white/30 w-5">{i + 1}.</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-white/90 truncate">
+                      {meta?.name ?? modelId}
+                    </span>
+                    {meta && (
+                      <span className="text-[10px] text-white/30 font-mono">{meta.contextWindow}</span>
+                    )}
+                  </div>
+                  {blocked && remaining > 0 && (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <AlertTriangle size={10} className="text-amber-400" />
+                      <span className="text-[10px] text-amber-400">
+                        {reasonLabel(blocked.reason)} · {fmtRemaining(remaining)}
+                      </span>
+                      <button
+                        onClick={() => clearOne(modelId)}
+                        className="text-[10px] text-white/30 hover:text-white/60 underline"
+                      >
+                        {lang === "en" ? "clear" : "清除"}
+                      </button>
+                    </div>
+                  )}
+                  {!blocked && (
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span className="text-[10px] text-white/40">
+                        {lang === "en" ? "Ready" : "可用"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/5 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                  title={lang === "en" ? "Move up" : "上移"}
+                >
+                  <ArrowUp size={12} />
+                </button>
+                <button
+                  onClick={() => move(i, 1)}
+                  disabled={i === list.length - 1}
+                  className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/5 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                  title={lang === "en" ? "Move down" : "下移"}
+                >
+                  <ArrowDown size={12} />
+                </button>
+                <button
+                  onClick={() => remove(i)}
+                  className="p-1 rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title={lang === "en" ? "Remove" : "移除"}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-white/15 hover:border-white/30 hover:bg-white/5 text-xs text-white/50 hover:text-white/80 transition-colors"
+          >
+            <Plus size={12} />
+            {lang === "en" ? "Add model" : "加入模型"}
+          </button>
+        )}
+
+        {adding && (
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={addValue}
+              onChange={e => setAddValue(e.target.value)}
+              className="flex-1 px-2 py-1.5 text-xs bg-white/5 border border-white/10 rounded text-white/90"
+            >
+              <option value="">{lang === "en" ? "Select a model…" : "選擇模型…"}</option>
+              {usableModels.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => add(addValue)}
+              disabled={!addValue}
+              className="px-3 py-1.5 text-xs bg-cyan-500/20 border border-cyan-500/30 rounded text-cyan-300 hover:bg-cyan-500/30 disabled:opacity-30 disabled:hover:bg-cyan-500/20 transition-colors"
+            >
+              {lang === "en" ? "Add" : "加入"}
+            </button>
+            <button
+              onClick={() => { setAdding(false); setAddValue(""); }}
+              className="px-2 py-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+            >
+              {lang === "en" ? "Cancel" : "取消"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="text-xs text-white/45 leading-relaxed pt-3 border-t border-white/6 space-y-1.5">
+        <div className="flex items-start gap-2">
+          <Clock size={12} className="mt-0.5 shrink-0 text-white/40" />
+          <span>
+            {lang === "en"
+              ? "Block durations honour the provider's Retry-After header when available, otherwise default to 1 min (rate limit) or 1 hour (quota exhausted)."
+              : "封鎖時長優先採用供應商的 Retry-After，否則預設為 1 分鐘（速率限制）或 1 小時（配額用盡）。"}
+          </span>
+        </div>
+        <div className="flex items-start gap-2">
+          <Layers size={12} className="mt-0.5 shrink-0 text-white/40" />
+          <span>
+            {lang === "en"
+              ? "Status persists across reloads and syncs across browser tabs."
+              : "狀態會跨重新整理保留，並在瀏覽器分頁間同步。"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================== *
  *  Files tab — upload limits                                       *
  * ============================================================== */
 
@@ -1495,6 +1758,7 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     { id: "tools", label: lang === "en" ? "Tools" : "工具", icon: <Wrench size={16} /> },
     { id: "mcp", label: "MCP", icon: <Server size={16} /> },
     { id: "routing", label: lang === "en" ? "Routing" : "路由", icon: <GitBranch size={16} /> },
+    { id: "priority", label: lang === "en" ? "Priority" : "優先級", icon: <Layers size={16} /> },
     { id: "files", label: lang === "en" ? "Files" : "檔案", icon: <FileText size={16} /> },
     { id: "privacy", label: t("settings.privacy", lang), icon: <Shield size={16} /> },
     { id: "about", label: t("settings.about", lang), icon: <Info size={16} /> },
@@ -1510,6 +1774,7 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     tools: <ToolsTab />,
     mcp: <McpTab />,
     routing: <RoutingTab />,
+    priority: <PriorityTab />,
     files: <FilesTab />,
     privacy: <PrivacyTab />,
     about: <AboutTab />,

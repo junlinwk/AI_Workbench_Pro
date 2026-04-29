@@ -9,6 +9,119 @@
  */
 import { ALL_MODELS, MODEL_PROVIDERS } from "@/components/ModelSwitcher"
 import { getAuthToken } from "@/lib/supabase"
+import { detectQuota } from "@/lib/priorityRouter"
+
+/**
+ * Structured AI error. Thrown by callAI / callAIWithTools so callers (notably
+ * the priority-fallback router) can branch on status / quota state without
+ * string-matching `err.message`.
+ */
+export class AIError extends Error {
+  status: number
+  retryAfterMs?: number
+  providerCode?: string
+  bodyText?: string
+
+  constructor(
+    message: string,
+    opts: {
+      status: number
+      retryAfterMs?: number
+      providerCode?: string
+      bodyText?: string
+    },
+  ) {
+    super(message)
+    this.name = "AIError"
+    this.status = opts.status
+    this.retryAfterMs = opts.retryAfterMs
+    this.providerCode = opts.providerCode
+    this.bodyText = opts.bodyText
+  }
+
+  /** True if the failure looks like a rate-limit / quota / overload signal. */
+  isQuotaLike(): boolean {
+    if (this.status === 429 || this.status === 529) return true
+    if (this.providerCode) {
+      const c = this.providerCode.toLowerCase()
+      return (
+        c === "insufficient_quota" ||
+        c === "rate_limit_exceeded" ||
+        c === "rate_limit_error" ||
+        c === "overloaded_error" ||
+        c === "resource_exhausted" ||
+        c === "quota_exceeded" ||
+        c === "billing_hard_limit_reached" ||
+        c === "too_many_requests"
+      )
+    }
+    return false
+  }
+
+  /** Categorise into the QuotaReason taxonomy. */
+  quotaReason(): "rate_limit" | "quota_exceeded" | "overloaded" | "auth_failed" | "unknown" {
+    if (this.status === 401 || this.status === 404) return "auth_failed"
+    if (this.status === 529) return "overloaded"
+    const c = (this.providerCode ?? "").toLowerCase()
+    if (c === "overloaded_error") return "overloaded"
+    if (c === "insufficient_quota" || c === "billing_hard_limit_reached" || c === "quota_exceeded")
+      return "quota_exceeded"
+    if (this.status === 429 || c.includes("rate_limit") || c === "resource_exhausted" || c === "too_many_requests")
+      return "rate_limit"
+    return "unknown"
+  }
+}
+
+/**
+ * Inspect a non-OK fetch response and throw the matching AIError.
+ * Reads the body once; closes the stream.
+ */
+async function throwAIError(res: Response): Promise<never> {
+  const bodyText = await res.text().catch(() => "")
+  const retryAfterHeader = res.headers.get("retry-after")
+  const retryAfterMs = retryAfterHeader
+    ? Number.isFinite(parseInt(retryAfterHeader, 10))
+      ? parseInt(retryAfterHeader, 10) * 1000
+      : undefined
+    : undefined
+
+  if (res.status === 401) {
+    throw new AIError(
+      "Authentication required — please log in and save your API key in Settings.",
+      { status: 401, bodyText },
+    )
+  }
+  if (res.status === 404) {
+    throw new AIError(
+      "No API key found — please add your API key in Settings.",
+      { status: 404, bodyText },
+    )
+  }
+
+  // Quota detection covers 429/529 and parses provider-specific codes from the body
+  const q = detectQuota(res.status, bodyText)
+  if (q.isQuota) {
+    const waitMsg =
+      retryAfterMs && Number.isFinite(retryAfterMs)
+        ? `Rate limited. Retry after ${Math.round(retryAfterMs / 1000)}s.`
+        : q.reason === "quota_exceeded"
+          ? "Quota exhausted on this model. Add credits or switch models."
+          : q.reason === "overloaded"
+            ? "Provider is overloaded. Try again shortly."
+            : "Rate limited. Please wait a moment and try again."
+    throw new AIError(waitMsg, {
+      status: res.status,
+      retryAfterMs,
+      providerCode: q.providerCode,
+      bodyText,
+    })
+  }
+
+  throw new AIError(
+    `API error (${res.status}): ${bodyText.slice(0, 200)}`,
+    { status: res.status, bodyText },
+  )
+}
 
 /** Vision-capable models that accept image inputs */
 export const VISION_MODELS = new Set([
@@ -338,35 +451,15 @@ export async function callAI(
     }
   }
 
-  if (res.status === 401) {
-    throw new Error("Authentication required — please log in and save your API key in Settings.")
-  }
-
-  if (res.status === 404) {
-    throw new Error("No API key found — please add your API key in Settings.")
-  }
-
-  if (res.status === 429) {
-    const retryAfter = res.headers.get("retry-after")
-    const waitSeconds = retryAfter ? parseInt(retryAfter, 10) : null
-    const waitMsg = waitSeconds
-      ? `Rate limited. Please retry after ${waitSeconds} seconds.`
-      : "Rate limited. Please wait a moment and try again."
-    throw new Error(waitMsg)
-  }
-
   if (!res.ok) {
-    const err = await res.text().catch(() => "")
-    throw new Error(
-      `API error (${res.status}): ${err.slice(0, 200)}`,
-    )
+    await throwAIError(res)
   }
 
   let data: any
   try {
     data = await res.json()
   } catch {
-    throw new Error("Invalid JSON response from API")
+    throw new AIError("Invalid JSON response from API", { status: res.status })
   }
 
   // Parse response based on provider
@@ -595,29 +688,15 @@ export async function callAIWithTools(
     }
   }
 
-  if (res.status === 401)
-    throw new Error("Authentication required — please log in and save your API key in Settings.")
-  if (res.status === 404)
-    throw new Error("No API key found — please add your API key in Settings.")
-  if (res.status === 429) {
-    const retryAfter = res.headers.get("retry-after")
-    const waitSeconds = retryAfter ? parseInt(retryAfter, 10) : null
-    throw new Error(
-      waitSeconds
-        ? `Rate limited. Please retry after ${waitSeconds} seconds.`
-        : "Rate limited. Please wait a moment and try again.",
-    )
-  }
   if (!res.ok) {
-    const err = await res.text().catch(() => "")
-    throw new Error(`API error (${res.status}): ${err.slice(0, 200)}`)
+    await throwAIError(res)
   }
 
   let data: any
   try {
     data = await res.json()
   } catch {
-    throw new Error("Invalid JSON response from API")
+    throw new AIError("Invalid JSON response from API", { status: res.status })
   }
 
   return parseFn(data)

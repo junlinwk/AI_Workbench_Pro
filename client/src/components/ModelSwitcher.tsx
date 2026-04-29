@@ -5,7 +5,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronDown, ChevronRight, Check, Key, AlertCircle, Sparkles, Plus
+  ChevronDown, ChevronRight, Check, Key, AlertCircle, Sparkles, Plus, Layers
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettings, type CustomModel } from "@/contexts/SettingsContext";
@@ -178,6 +178,24 @@ export const AUTO_MODEL: AIModel = {
   contextWindow: "—",
 };
 
+/**
+ * "priority" pseudo-model. When selected, the chat pipeline tries each model
+ * in `settings.priorityModels` order and falls down on quota / rate-limit
+ * errors. Each new message restarts at the top, so it climbs back as caps
+ * recover. Configured in Settings → Priority.
+ */
+export const PRIORITY_MODEL: AIModel = {
+  id: "priority",
+  name: "Priority",
+  providerId: "priority",
+  description: "依優先級清單，配額用完自動往下切",
+  speed: 5,
+  intelligence: 5,
+  badge: "Fallback",
+  badgeColor: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+  contextWindow: "—",
+};
+
 export function getAllModels(customModels: CustomModel[]): AIModel[] {
   const customAIModels: AIModel[] = customModels.map(cm => ({
     id: cm.id,
@@ -188,7 +206,7 @@ export function getAllModels(customModels: CustomModel[]): AIModel[] {
     intelligence: 3,
     contextWindow: cm.contextWindow,
   }));
-  return [AUTO_MODEL, ...BUILT_IN_MODELS, ...customAIModels];
+  return [AUTO_MODEL, PRIORITY_MODEL, ...BUILT_IN_MODELS, ...customAIModels];
 }
 
 // Keep ALL_MODELS as a backwards-compatible alias for built-in models.
@@ -273,7 +291,8 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
     // Auto resolves to a real model at send time; routing failures fall back.
     const isCustom = settings.customModels.some(cm => cm.id === model.id);
     const isAuto = model.id === "auto";
-    if (!isCustom && !isAuto) {
+    const isPriority = model.id === "priority";
+    if (!isCustom && !isAuto && !isPriority) {
       const providerHasKey = hasApiKey(model.providerId);
       if (!providerHasKey) {
         onOpenSettings?.();
@@ -312,6 +331,8 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
         <div className="flex items-center gap-1.5">
           {selectedModel.id === "auto" ? (
             <Sparkles size={16} className="text-violet-400" />
+          ) : selectedModel.id === "priority" ? (
+            <Layers size={16} className="text-cyan-400" />
           ) : selectedProvider ? (
             <ProviderIcon icon={selectedProvider.icon} darkIcon={selectedProvider.darkIcon} size={18} />
           ) : (
@@ -319,10 +340,10 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
           )}
           <span className="text-sm font-medium">{selectedModel.name}</span>
         </div>
-        {selectedModel.id !== "auto" && !hasKey && !settings.customModels.some(cm => cm.id === selectedModel.id) && (
+        {selectedModel.id !== "auto" && selectedModel.id !== "priority" && !hasKey && !settings.customModels.some(cm => cm.id === selectedModel.id) && (
           <AlertCircle size={12} className="text-amber-400" />
         )}
-        {selectedModel.badge && hasKey && (
+        {selectedModel.badge && (hasKey || selectedModel.id === "auto" || selectedModel.id === "priority") && (
           <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-md border", selectedModel.badgeColor)}>
             {selectedModel.badge}
           </span>
@@ -367,6 +388,35 @@ export default function ModelSwitcher({ className, onOpenSettings }: ModelSwitch
                 </div>
                 {settings.selectedModelId === "auto" && (
                   <Check size={14} className="text-violet-400" />
+                )}
+              </button>
+
+              {/* Priority pseudo-model — fallback chain */}
+              <button
+                onClick={() => handleSelect(PRIORITY_MODEL)}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors",
+                  settings.selectedModelId === "priority"
+                    ? "bg-cyan-500/20 border border-cyan-500/40"
+                    : "hover:bg-white/5 dark:hover:bg-white/5 hover:bg-gray-100 border border-transparent",
+                )}
+              >
+                <Layers size={14} className="text-cyan-400" />
+                <div className="flex-1 text-left">
+                  <div className="text-sm font-semibold text-gray-800 dark:text-white/90 flex items-center gap-2">
+                    {lang === "en" ? "Priority" : "優先級"}
+                    <span className="text-[10px] text-gray-400 dark:text-white/30 font-normal">
+                      {settings.priorityModels?.length ?? 0} {lang === "en" ? "models" : "個"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 dark:text-white/40">
+                    {lang === "en"
+                      ? "Top-down fallback when quota runs out"
+                      : "依序 fallback，配額用完自動切下一個"}
+                  </div>
+                </div>
+                {settings.selectedModelId === "priority" && (
+                  <Check size={14} className="text-cyan-400" />
                 )}
               </button>
 

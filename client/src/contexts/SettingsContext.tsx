@@ -140,6 +140,13 @@ export interface Settings {
 
   /** Auto-routing configuration (Phase 4). */
   routingPrefs: RoutingPrefs
+
+  /**
+   * Ordered model fallback chain used when `selectedModelId === "priority"`.
+   * Each call tries models top-to-bottom, skipping any currently rate-limited
+   * (see lib/quotaRegistry.ts). Empty list = priority mode is non-functional.
+   */
+  priorityModels: string[]
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -196,6 +203,12 @@ const DEFAULT_SETTINGS: Settings = {
     },
     classifierModel: "gpt-4o-mini",
   },
+  priorityModels: [
+    "claude-sonnet-4-6",
+    "gpt-4o",
+    "gemini-2.5-pro",
+    "gpt-4o-mini",
+  ],
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,6 +299,19 @@ function validateSettings(raw: any): Partial<Settings> {
   if (typeof raw.mcpEnabled === "boolean") out.mcpEnabled = raw.mcpEnabled
   if (typeof raw.fileUploadMaxMB === "number" && raw.fileUploadMaxMB > 0 && raw.fileUploadMaxMB <= 100)
     out.fileUploadMaxMB = raw.fileUploadMaxMB
+  if (Array.isArray(raw.priorityModels)) {
+    const seen = new Set<string>()
+    const cleaned: string[] = []
+    for (const item of raw.priorityModels) {
+      if (typeof item !== "string") continue
+      const id = item.slice(0, 128)
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      cleaned.push(id)
+      if (cleaned.length >= 32) break
+    }
+    out.priorityModels = cleaned
+  }
   if (raw.routingPrefs && typeof raw.routingPrefs === "object") {
     const rp = raw.routingPrefs as any
     const mode = rp.mode === "ai-assisted" ? "ai-assisted" : "heuristic"

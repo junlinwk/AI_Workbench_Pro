@@ -60,6 +60,8 @@ import type { Tool, ToolContext } from "@/lib/tools/types"
 import { getBuiltinTools } from "@/lib/tools/registry"
 import { getMcpTools, mergeTools } from "@/lib/tools/mcpAdapter"
 import { pickModel, estimateTokens } from "@/lib/modelRouter"
+import { withPriority, AllModelsExhaustedError } from "@/lib/priorityRouter"
+import { isBlocked } from "@/lib/quotaRegistry"
 import { prepareAttachment } from "@/lib/files/prepareAttachment"
 import { supportsNativePdf } from "@/lib/files/types"
 import type { AttachedFile } from "@/lib/files/types"
@@ -1758,8 +1760,28 @@ export default function ChatInterface({
       })
 
       // [PHASE-4] Auto-routing: resolve effective model id if user picked "auto"
+      // [PHASE-6] Priority-fallback: resolve to first non-blocked model and pass list down
       let effectiveModelId = settings.selectedModelId
       let routingReason: string | undefined
+      let priorityList: string[] | undefined
+      if (settings.selectedModelId === "priority") {
+        priorityList = (settings.priorityModels ?? []).filter((id) => !!id)
+        if (priorityList.length === 0) {
+          toast.error(
+            lang === "en"
+              ? "Priority list is empty — configure it in Settings → Priority"
+              : "優先級清單是空的 — 請到「設定 → 優先級」設定",
+          )
+          setIsTyping(false)
+          return
+        }
+        const firstUsable = priorityList.find((id) => !isBlocked(id)) ?? priorityList[0]!
+        effectiveModelId = firstUsable
+        routingReason =
+          lang === "en"
+            ? `priority · top model: ${firstUsable}`
+            : `優先級 · 起始：${firstUsable}`
+      }
       if (settings.selectedModelId === "auto") {
         try {
           const availableIds = new Set<string>()
@@ -1840,6 +1862,7 @@ export default function ChatInterface({
       if (tools.length > 0) {
         const loopPromise = runToolLoop(chatHistory, {
           modelId: effectiveModelId,
+          priorityList,
           fallbackApiKey: fallbackKey,
           temperature: effectiveTemperature,
           maxTokens: settings.maxTokens,
@@ -1856,6 +1879,16 @@ export default function ChatInterface({
               { duration: 1500 },
             )
           },
+          onModelChange: (info) => {
+            if (info.reason === "fallback" && info.previousModelId) {
+              toast.info(
+                lang === "en"
+                  ? `↪ Falling back: ${info.previousModelId} → ${info.modelId}`
+                  : `↪ 切換模型：${info.previousModelId} → ${info.modelId}`,
+                { duration: 2500 },
+              )
+            }
+          },
         })
         pendingResponses.set(effectiveConvId, {
           convId: effectiveConvId,
@@ -1869,6 +1902,14 @@ export default function ChatInterface({
         const loopResult = await loopPromise
         pendingResponses.delete(effectiveConvId)
         response = loopResult.text
+        // If priority chain switched mid-loop, record which model actually served
+        if (priorityList && loopResult.finalModelId !== effectiveModelId) {
+          effectiveModelId = loopResult.finalModelId
+          routingReason =
+            lang === "en"
+              ? `priority · served by ${loopResult.finalModelId}`
+              : `優先級 · 由 ${loopResult.finalModelId} 完成`
+        }
         executedToolCalls = loopResult.toolUseParts.map((p) => {
           const tu = p as Extract<ContentPart, { type: "tool_use" }>
           const matchingResult = loopResult.toolResultParts.find(
@@ -1892,6 +1933,47 @@ export default function ChatInterface({
               ? "Tool budget exhausted"
               : "工具呼叫次數已達上限",
           )
+        }
+      } else if (priorityList && priorityList.length > 0) {
+        const priPromise = withPriority(priorityList, (modelId) =>
+          callAI(
+            chatHistory,
+            modelId,
+            fallbackKey,
+            effectiveTemperature,
+            settings.maxTokens,
+            fullSystemPrompt,
+            abort.signal,
+          ),
+          {
+            onSkip: (modelId, reason) => {
+              toast.info(
+                lang === "en"
+                  ? `↪ Skipping ${modelId} (${reason})`
+                  : `↪ 跳過 ${modelId}（${reason}）`,
+                { duration: 2500 },
+              )
+            },
+          },
+        )
+        pendingResponses.set(effectiveConvId, {
+          convId: effectiveConvId,
+          promise: priPromise.then((r) => r.value),
+          abort,
+          userId: effectiveUserId,
+          modelId: effectiveModelId,
+          branchId: activeBranchId,
+          userMsg,
+        })
+        const priResult = await priPromise
+        pendingResponses.delete(effectiveConvId)
+        response = priResult.value
+        if (priResult.modelId !== effectiveModelId) {
+          effectiveModelId = priResult.modelId
+          routingReason =
+            lang === "en"
+              ? `priority · served by ${priResult.modelId}`
+              : `優先級 · 由 ${priResult.modelId} 完成`
         }
       } else {
         const aiPromise = callAI(
@@ -1946,13 +2028,14 @@ export default function ChatInterface({
           .catch(() => {})
       }
 
-      // Extract conversation memory in background
+      // Extract conversation memory in background — use the resolved real model id
+      // since "auto" / "priority" are pseudo-models that callAI cannot dispatch on.
       extractMemoryInBackground(
         effectiveUserId,
         effectiveConvId,
         aiMsg,
         userMsg,
-        settings.selectedModelId,
+        effectiveModelId,
         fallbackKey,
         callAI,
         activeBranchId,
@@ -1965,7 +2048,7 @@ export default function ChatInterface({
           const titlePrompt = `Generate a short title (max 20 chars) for this conversation based on the user's message. Reply with ONLY the title, no quotes, no explanation.\n\nUser: "${sanitized.slice(0, 200)}"`
           const title = await callAI(
             [{ role: "user", content: titlePrompt }],
-            settings.selectedModelId,
+            effectiveModelId,
             fallbackKey,
             0,
             30,
@@ -2001,10 +2084,18 @@ export default function ChatInterface({
     } catch (err: any) {
       setIsTyping(false)
       if (err.name === "AbortError") return
+
+      const isExhausted = err instanceof AllModelsExhaustedError
+      const errBody = isExhausted
+        ? lang === "en"
+          ? `**All priority models are unavailable.**\n\n${err.attempts.map((a: { modelId: string; reason: string }) => `- \`${a.modelId}\` — ${a.reason}`).join("\n")}\n\nAdd credits, wait for caps to reset, or pick a specific model.`
+          : `**所有優先級模型目前都無法使用。**\n\n${err.attempts.map((a: { modelId: string; reason: string }) => `- \`${a.modelId}\` — ${a.reason}`).join("\n")}\n\n請添加額度、等待限額重置，或改選特定模型。`
+        : `**${lang === "en" ? "Error" : "發生錯誤"}**\n\n${err.message}\n\n${lang === "en" ? "Please check your API key or try again later." : "請檢查您的 API Key 是否正確，或稍後再試。"}`
+
       const errMsg: Message = {
         id: `m${Date.now() + 1}`,
         role: "assistant",
-        content: `**${lang === "en" ? "Error" : "發生錯誤"}**\n\n${err.message}\n\n${lang === "en" ? "Please check your API key or try again later." : "請檢查您的 API Key 是否正確，或稍後再試。"}`,
+        content: errBody,
         timestamp: new Date().toLocaleTimeString("zh-TW", {
           hour: "2-digit",
           minute: "2-digit",
@@ -2013,7 +2104,13 @@ export default function ChatInterface({
         branchId: activeBranchId,
       }
       setAllMessages((prev) => [...prev, errMsg])
-      toast.error(t("chat.apiFailed", lang))
+      toast.error(
+        isExhausted
+          ? lang === "en"
+            ? "All priority models exhausted"
+            : "優先級清單全數封鎖"
+          : t("chat.apiFailed", lang),
+      )
     } finally {
       abortRef.current = null
     }
@@ -2177,9 +2274,20 @@ export default function ChatInterface({
       const regenBranchData = branchData.branches.find((b: any) => b.id === activeBranchId)
       const regenTemperature = regenBranchData?.temperature ?? settings.temperature
 
+      // Resolve pseudo-models (auto / priority) to a concrete model id for regen.
+      // Auto isn't recomputed here — fall through to balanced; priority picks the first non-blocked.
+      let regenModelId = settings.selectedModelId
+      if (regenModelId === "priority") {
+        const list = settings.priorityModels ?? []
+        regenModelId =
+          list.find((id) => !isBlocked(id)) ?? list[0] ?? settings.routingPrefs.defaults.balanced
+      } else if (regenModelId === "auto") {
+        regenModelId = settings.routingPrefs.defaults.balanced
+      }
+
       const response = await callAI(
         chatHistory,
-        settings.selectedModelId,
+        regenModelId,
         fallbackKey,
         regenTemperature,
         settings.maxTokens,
@@ -2195,7 +2303,7 @@ export default function ChatInterface({
           hour: "2-digit",
           minute: "2-digit",
         }),
-        model: settings.selectedModelId,
+        model: regenModelId,
         branchId: activeBranchId,
       }
       setAllMessages((prev) => [...prev, aiMsg])
